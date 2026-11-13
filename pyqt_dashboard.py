@@ -173,20 +173,6 @@ class SignalDashboard(QMainWindow):
             return 2 * np.abs(2 * (t * sig_freq - np.floor(0.5 + t * sig_freq))) - 1
         return np.zeros_like(t)
 
-    @staticmethod
-    def single_sided_spectrum(signal, sampling_frequency):
-        sample_count = len(signal)
-        if sample_count == 0 or sampling_frequency <= 0:
-            raise ValueError("Spectrum requires samples and a positive sampling frequency.")
-
-        window = np.hanning(sample_count) if sample_count > 2 else np.ones(sample_count)
-        windowed_signal = signal * window
-        fft_size = 4 * sample_count
-        frequencies = np.fft.rfftfreq(fft_size, d=1 / sampling_frequency)
-        amplitudes = np.abs(np.fft.rfft(windowed_signal, n=fft_size)) / np.sum(window)
-        amplitudes[1:-1] *= 2
-        return frequencies, amplitudes
-
     def apply_digital_filter(self, signal, samp_freq, filter_type, cutoff1, cutoff2):
         if filter_type == "None" or len(signal) < 15:
             return signal
@@ -254,13 +240,13 @@ class SignalDashboard(QMainWindow):
         # Nyquist Theorem Check Update
         minimum_sampling_frequency = 2 * signal_frequency
         if sampling_frequency <= minimum_sampling_frequency:
-            self.status_label.setText(f"WARNING: Aliasing! (Sampling frequency must be > "f"{minimum_sampling_frequency} Hz)")
+            self.status_label.setText(f"WARNING: Aliasing! (Sampling frequency must be > {minimum_sampling_frequency} Hz)")
             self.status_label.setStyleSheet("color: #ff5555; font-weight: bold;")
         else:
             self.status_label.setText("Nyquist criterion met. No aliasing detected.")
             self.status_label.setStyleSheet("color: #55ff55; font-weight: bold;")
 
-        # Update Top Plot
+        # Update Top Plot (ax1)
         self.ax1.clear()
         if filter_type != "None":
             self.ax1.plot(t_cont, y_cont, color='gray', alpha=0.3, label="Original")
@@ -269,42 +255,37 @@ class SignalDashboard(QMainWindow):
         else:
             self.ax1.plot(t_cont, y_cont, color='#3daee9', linewidth=2)
             
-        self.ax1.set_title(f"Input Signal ({sig_type} @ {signal_frequency} Hz)",fontweight='bold',color='white',)
+        self.ax1.set_title(f"Input Signal ({sig_type} @ {signal_frequency} Hz)", fontweight='bold', color='white')
         self.ax1.set_xlabel("Time (s)")
         self.ax1.set_ylabel("Amplitude")
         self.ax1.set_ylim(-1.5, 1.5)
         self.ax1.grid(True, linestyle='--', alpha=0.3)
 
-        # Update Bottom Plot
+        # Update Bottom Plot (ax2)
         self.ax2.clear()
         self.ax2.plot(t_cont, y_cont_filt, color='#3daee9', alpha=0.2)
         self.ax2.stem(t_samp, y_samp_filt, linefmt='#ff5555', markerfmt='ro', basefmt='white')
-        self.ax2.set_title(f"Output Signal (Sampled @ {sampling_frequency} Hz) + Digital Filter", fontweight='bold', color='white',)
+        self.ax2.set_title(f"Output Signal (Sampled @ {sampling_frequency} Hz) + Digital Filter", fontweight='bold', color='white')
         self.ax2.set_xlabel("Time (s)")
         self.ax2.set_ylabel("Amplitude")
         self.ax2.set_ylim(-1.5, 1.5)
         self.ax2.grid(True, linestyle='--', alpha=0.3)
 
-        # Plot an amplitude-corrected, Hann-windowed spectrum of the sampled signal.
-        frequencies, input_spectrum = self.single_sided_spectrum(y_samp, sampling_frequency)
-        _, output_spectrum = self.single_sided_spectrum(y_samp_filt, sampling_frequency)
+        # Update FFT Plot (ax3)
         self.ax3.clear()
-        if filter_type != "None":
-            self.ax3.plot(frequencies, input_spectrum, color='gray', alpha=0.7, label="Input")
-            self.ax3.plot(frequencies, output_spectrum, color='#ff5555', linewidth=2, label="Filtered")
-            self.ax3.legend(loc="upper right", fontsize=8)
-        else:
-            self.ax3.plot(frequencies, output_spectrum, color='#3daee9', linewidth=2)
-        frequency_resolution = sampling_frequency / len(y_samp)
-        self.ax3.set_title(
-            f"FFT Amplitude Spectrum (Hann, resolution {frequency_resolution:.2f} Hz)",
-            fontweight='bold',
-            color='white',
-        )
-        self.ax3.set_xlabel("Frequency (Hz)")
-        self.ax3.set_ylabel("Amplitude")
-        self.ax3.set_xlim(0, sampling_frequency / 2)
-        self.ax3.grid(True, linestyle='--', alpha=0.3)
+        if len(y_samp_filt) > 0:
+            n = len(y_samp_filt)
+            # Calculate positive frequencies and FFT magnitude
+            xf = np.fft.rfftfreq(n, d=1/sampling_frequency)
+            yf = np.abs(np.fft.rfft(y_samp_filt)) / (n / 2) 
+            
+            self.ax3.plot(xf, yf, color='#ffaa00', linewidth=2)
+            self.ax3.fill_between(xf, 0, yf, color='#ffaa00', alpha=0.3)
+            self.ax3.set_title("Frequency Spectrum (FFT)", fontweight='bold', color='white')
+            self.ax3.set_xlabel("Frequency (Hz)")
+            self.ax3.set_ylabel("Magnitude")
+            self.ax3.set_xlim(0, sampling_frequency / 2) # Show up to Nyquist limit
+            self.ax3.grid(True, linestyle='--', alpha=0.3)
 
         self.canvas.draw()
 
