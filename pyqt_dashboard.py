@@ -176,10 +176,15 @@ class SignalDashboard(QMainWindow):
     @staticmethod
     def single_sided_spectrum(signal, sampling_frequency):
         sample_count = len(signal)
-        frequencies = np.fft.rfftfreq(sample_count, d=1 / sampling_frequency)
-        amplitudes = np.abs(np.fft.rfft(signal)) / sample_count
-        if sample_count > 1:
-            amplitudes[1:-1 if sample_count % 2 == 0 else None] *= 2
+        if sample_count == 0 or sampling_frequency <= 0:
+            raise ValueError("Spectrum requires samples and a positive sampling frequency.")
+
+        window = np.hanning(sample_count) if sample_count > 2 else np.ones(sample_count)
+        windowed_signal = signal * window
+        fft_size = 4 * sample_count
+        frequencies = np.fft.rfftfreq(fft_size, d=1 / sampling_frequency)
+        amplitudes = np.abs(np.fft.rfft(windowed_signal, n=fft_size)) / np.sum(window)
+        amplitudes[1:-1] *= 2
         return frequencies, amplitudes
 
     def apply_digital_filter(self, signal, samp_freq, filter_type, cutoff1, cutoff2):
@@ -234,7 +239,8 @@ class SignalDashboard(QMainWindow):
         y_cont = self.generate_signal(t_cont, signal_frequency, sig_type)
 
         # Sampled data generation
-        t_samp = np.arange(0, duration + 1e-9, 1/sampling_frequency)
+        sample_count = max(1, int(round(duration * sampling_frequency)))
+        t_samp = np.arange(sample_count) / sampling_frequency
         y_samp = self.generate_signal(t_samp, signal_frequency, sig_type)
 
         # Apply Filters
@@ -279,7 +285,7 @@ class SignalDashboard(QMainWindow):
         self.ax2.set_ylim(-1.5, 1.5)
         self.ax2.grid(True, linestyle='--', alpha=0.3)
 
-        # Plot the sampled signal's one-sided amplitude spectrum.
+        # Plot an amplitude-corrected, Hann-windowed spectrum of the sampled signal.
         frequencies, input_spectrum = self.single_sided_spectrum(y_samp, sampling_frequency)
         _, output_spectrum = self.single_sided_spectrum(y_samp_filt, sampling_frequency)
         self.ax3.clear()
@@ -289,7 +295,12 @@ class SignalDashboard(QMainWindow):
             self.ax3.legend(loc="upper right", fontsize=8)
         else:
             self.ax3.plot(frequencies, output_spectrum, color='#3daee9', linewidth=2)
-        self.ax3.set_title("Frequency-Domain Spectrum (FFT)", fontweight='bold', color='white')
+        frequency_resolution = sampling_frequency / len(y_samp)
+        self.ax3.set_title(
+            f"FFT Amplitude Spectrum (Hann, resolution {frequency_resolution:.2f} Hz)",
+            fontweight='bold',
+            color='white',
+        )
         self.ax3.set_xlabel("Frequency (Hz)")
         self.ax3.set_ylabel("Amplitude")
         self.ax3.set_xlim(0, sampling_frequency / 2)
