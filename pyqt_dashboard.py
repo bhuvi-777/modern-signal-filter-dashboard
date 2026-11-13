@@ -14,7 +14,7 @@ class SignalDashboard(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Modern Signal & Filter Dashboard (PyQt6)")
-        self.resize(1100, 850)
+        self.resize(1100, 950)
 
         # Apply Dark Theme Stylesheet
         self.setStyleSheet("""
@@ -122,10 +122,10 @@ class SignalDashboard(QMainWindow):
 
         # Setup dark-themed Matplotlib figure
         plt.style.use('dark_background')
-        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(7, 6))
+        self.fig, (self.ax1, self.ax2, self.ax3) = plt.subplots(3, 1, figsize=(7, 8))
         self.fig.patch.set_facecolor('#2b2b2b') 
         
-        for ax in (self.ax1, self.ax2):
+        for ax in (self.ax1, self.ax2, self.ax3):
             ax.set_facecolor('#2b2b2b')
             ax.grid(True, linestyle='--', alpha=0.3)
 
@@ -172,6 +172,20 @@ class SignalDashboard(QMainWindow):
         elif sig_type == "Triangular":
             return 2 * np.abs(2 * (t * sig_freq - np.floor(0.5 + t * sig_freq))) - 1
         return np.zeros_like(t)
+
+    @staticmethod
+    def single_sided_spectrum(signal, sampling_frequency):
+        sample_count = len(signal)
+        if sample_count == 0 or sampling_frequency <= 0:
+            raise ValueError("Spectrum requires samples and a positive sampling frequency.")
+
+        window = np.hanning(sample_count) if sample_count > 2 else np.ones(sample_count)
+        windowed_signal = signal * window
+        fft_size = 4 * sample_count
+        frequencies = np.fft.rfftfreq(fft_size, d=1 / sampling_frequency)
+        amplitudes = np.abs(np.fft.rfft(windowed_signal, n=fft_size)) / np.sum(window)
+        amplitudes[1:-1] *= 2
+        return frequencies, amplitudes
 
     def apply_digital_filter(self, signal, samp_freq, filter_type, cutoff1, cutoff2):
         if filter_type == "None" or len(signal) < 15:
@@ -225,7 +239,8 @@ class SignalDashboard(QMainWindow):
         y_cont = self.generate_signal(t_cont, signal_frequency, sig_type)
 
         # Sampled data generation
-        t_samp = np.arange(0, duration + 1e-9, 1/sampling_frequency)
+        sample_count = max(1, int(round(duration * sampling_frequency)))
+        t_samp = np.arange(sample_count) / sampling_frequency
         y_samp = self.generate_signal(t_samp, signal_frequency, sig_type)
 
         # Apply Filters
@@ -269,6 +284,27 @@ class SignalDashboard(QMainWindow):
         self.ax2.set_ylabel("Amplitude")
         self.ax2.set_ylim(-1.5, 1.5)
         self.ax2.grid(True, linestyle='--', alpha=0.3)
+
+        # Plot an amplitude-corrected, Hann-windowed spectrum of the sampled signal.
+        frequencies, input_spectrum = self.single_sided_spectrum(y_samp, sampling_frequency)
+        _, output_spectrum = self.single_sided_spectrum(y_samp_filt, sampling_frequency)
+        self.ax3.clear()
+        if filter_type != "None":
+            self.ax3.plot(frequencies, input_spectrum, color='gray', alpha=0.7, label="Input")
+            self.ax3.plot(frequencies, output_spectrum, color='#ff5555', linewidth=2, label="Filtered")
+            self.ax3.legend(loc="upper right", fontsize=8)
+        else:
+            self.ax3.plot(frequencies, output_spectrum, color='#3daee9', linewidth=2)
+        frequency_resolution = sampling_frequency / len(y_samp)
+        self.ax3.set_title(
+            f"FFT Amplitude Spectrum (Hann, resolution {frequency_resolution:.2f} Hz)",
+            fontweight='bold',
+            color='white',
+        )
+        self.ax3.set_xlabel("Frequency (Hz)")
+        self.ax3.set_ylabel("Amplitude")
+        self.ax3.set_xlim(0, sampling_frequency / 2)
+        self.ax3.grid(True, linestyle='--', alpha=0.3)
 
         self.canvas.draw()
 
