@@ -53,8 +53,12 @@ Defines how many samples are taken per second.
 Determines the total time length of the generated signal.
 
 ### Frequency-Domain Spectrum
-The third plot shows the one-sided FFT amplitude spectrum of the sampled signal.
-When a filter is selected, it overlays the input and filtered spectra.
+The third plot shows a one-sided, Hann-windowed FFT amplitude spectrum of the sampled signal.
+
+The Hann window reduces spectral leakage, and its coherent gain is accounted for in the
+amplitude scaling. Zero-padding smooths the plotted curve but does not increase the true
+frequency resolution, which is shown in the plot title. When a filter is selected, the
+input and filtered spectra are overlaid.
 
 ### Filter Type
 Select the filter to apply:
