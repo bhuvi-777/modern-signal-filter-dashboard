@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, freqz
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QLineEdit, QComboBox, 
                              QPushButton, QMessageBox, QFrame, QGridLayout)
@@ -122,13 +122,16 @@ class SignalDashboard(QMainWindow):
 
         # Setup dark-themed Matplotlib figure
         plt.style.use('dark_background')
-        self.fig, (self.ax1, self.ax2, self.ax3) = plt.subplots(3, 1, figsize=(7, 8))
+        self.fig, (self.ax1, self.ax2, self.ax3) = plt.subplots(3, 1, figsize=(7, 9))
         self.fig.patch.set_facecolor('#2b2b2b') 
         
         for ax in (self.ax1, self.ax2, self.ax3):
             ax.set_facecolor('#2b2b2b')
             ax.grid(True, linestyle='--', alpha=0.3)
 
+        # Create a secondary y-axis on ax3 for phase plotting
+        self.ax3_phase = self.ax3.twinx()
+        
         self.fig.tight_layout(pad=4.0)
         
         self.canvas = FigureCanvas(self.fig)
@@ -175,7 +178,7 @@ class SignalDashboard(QMainWindow):
 
     def apply_digital_filter(self, signal, samp_freq, filter_type, cutoff1, cutoff2):
         if filter_type == "None" or len(signal) < 15:
-            return signal
+            return signal, None, None
             
         nyquist = 0.5 * samp_freq
         order = 4
@@ -196,7 +199,7 @@ class SignalDashboard(QMainWindow):
                     raise ValueError("Low cutoff must be > 0.")
                 b, a = butter(order, [low/nyquist, high/nyquist], btype=filter_type.lower())
                 
-            return filtfilt(b, a, signal)
+            return filtfilt(b, a, signal), b, a
             
         except ValueError as err:
             raise ValueError(f"Filter config error for sampling freq={samp_freq}Hz:\n{str(err)}")
@@ -229,10 +232,10 @@ class SignalDashboard(QMainWindow):
         t_samp = np.arange(sample_count) / sampling_frequency
         y_samp = self.generate_signal(t_samp, signal_frequency, sig_type)
 
-        # Apply Filters
+        # Apply Filters (Now unpacks filtered signal AND filter coefficients b, a)
         try:
-            y_cont_filt = self.apply_digital_filter(y_cont, continuous_sampling_frequency, filter_type, cutoff1, cutoff2)
-            y_samp_filt = self.apply_digital_filter(y_samp, sampling_frequency, filter_type, cutoff1, cutoff2)
+            y_cont_filt, _, _ = self.apply_digital_filter(y_cont, continuous_sampling_frequency, filter_type, cutoff1, cutoff2)
+            y_samp_filt, b, a = self.apply_digital_filter(y_samp, sampling_frequency, filter_type, cutoff1, cutoff2)
         except ValueError as err:
             QMessageBox.critical(self, "Filter Error", str(err))
             return
@@ -246,7 +249,7 @@ class SignalDashboard(QMainWindow):
             self.status_label.setText("Nyquist criterion met. No aliasing detected.")
             self.status_label.setStyleSheet("color: #55ff55; font-weight: bold;")
 
-        # Update Top Plot (ax1)
+        # Update Top Plot
         self.ax1.clear()
         if filter_type != "None":
             self.ax1.plot(t_cont, y_cont, color='gray', alpha=0.3, label="Original")
@@ -261,7 +264,7 @@ class SignalDashboard(QMainWindow):
         self.ax1.set_ylim(-1.5, 1.5)
         self.ax1.grid(True, linestyle='--', alpha=0.3)
 
-        # Update Bottom Plot (ax2)
+        # Update Middle Plot
         self.ax2.clear()
         self.ax2.plot(t_cont, y_cont_filt, color='#3daee9', alpha=0.2)
         self.ax2.stem(t_samp, y_samp_filt, linefmt='#ff5555', markerfmt='ro', basefmt='white')
@@ -271,21 +274,39 @@ class SignalDashboard(QMainWindow):
         self.ax2.set_ylim(-1.5, 1.5)
         self.ax2.grid(True, linestyle='--', alpha=0.3)
 
-        # Update FFT Plot (ax3)
+        # Update Bottom Plot (Filter Frequency Response: Bode Plot)
         self.ax3.clear()
-        if len(y_samp_filt) > 0:
-            n = len(y_samp_filt)
-            # Calculate positive frequencies and FFT magnitude
-            xf = np.fft.rfftfreq(n, d=1/sampling_frequency)
-            yf = np.abs(np.fft.rfft(y_samp_filt)) / (n / 2) 
+        self.ax3_phase.clear()
+        
+        if b is not None and a is not None:
+            # Calculate frequency response using scipy.signal.freqz
+            w, h = freqz(b, a, worN=2000)
+            freqs = w * sampling_frequency / (2 * np.pi)  # Convert rad/sample to Hz
             
-            self.ax3.plot(xf, yf, color='#ffaa00', linewidth=2)
-            self.ax3.fill_between(xf, 0, yf, color='#ffaa00', alpha=0.3)
-            self.ax3.set_title("Frequency Spectrum (FFT)", fontweight='bold', color='white')
-            self.ax3.set_xlabel("Frequency (Hz)")
-            self.ax3.set_ylabel("Magnitude")
-            self.ax3.set_xlim(0, sampling_frequency / 2) # Show up to Nyquist limit
-            self.ax3.grid(True, linestyle='--', alpha=0.3)
+            # Avoid divide-by-zero or log(0) issues
+            mag_db = 20 * np.log10(np.maximum(np.abs(h), 1e-10))
+            phase_deg = np.unwrap(np.angle(h)) * 180 / np.pi
+            
+            # Plot Magnitude on primary y-axis
+            self.ax3.plot(freqs, mag_db, color='#3daee9', linewidth=2)
+            self.ax3.set_ylabel("Magnitude (dB)", color='#3daee9', fontweight='bold')
+            self.ax3.tick_params(axis='y', colors='#3daee9')
+            self.ax3.set_ylim(max(-80, np.min(mag_db)-5), max(5, np.max(mag_db)+5))
+            
+            # Plot Phase on secondary y-axis
+            self.ax3_phase.plot(freqs, phase_deg, color='#ffaa00', linewidth=1.5, linestyle='--')
+            self.ax3_phase.set_ylabel("Phase (Degrees)", color='#ffaa00', fontweight='bold')
+            self.ax3_phase.tick_params(axis='y', colors='#ffaa00')
+            
+            self.ax3.set_title(f"{filter_type} Filter Frequency Response (Magnitude & Phase)", fontweight='bold', color='white')
+        else:
+            self.ax3.set_title("Filter Frequency Response (No Filter Selected)", fontweight='bold', color='gray')
+            self.ax3.set_ylabel("Magnitude (dB)", color='gray')
+            self.ax3_phase.set_ylabel("Phase (Degrees)", color='gray')
+
+        self.ax3.set_xlabel("Frequency (Hz)")
+        self.ax3.set_xlim(0, sampling_frequency / 2) # Show up to the Nyquist limit
+        self.ax3.grid(True, linestyle='--', alpha=0.3)
 
         self.canvas.draw()
 
