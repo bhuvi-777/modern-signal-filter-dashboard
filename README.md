@@ -99,3 +99,6 @@ pyqt_git/
 ## License
 
 This project is provided as a learning/demo project for signal processing and PyQt6 GUI development.
+
+
+Learning Git: Understanding commit and push.
