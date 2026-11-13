@@ -132,8 +132,6 @@ class SignalDashboard(QMainWindow):
         # Create a secondary y-axis on ax3 for phase plotting
         self.ax3_phase = self.ax3.twinx()
         
-        self.fig.tight_layout(pad=4.0)
-        
         self.canvas = FigureCanvas(self.fig)
         plot_layout.addWidget(self.canvas)
         main_layout.addWidget(plot_frame, stretch=1)
@@ -288,26 +286,40 @@ class SignalDashboard(QMainWindow):
             phase_deg = np.unwrap(np.angle(h)) * 180 / np.pi
             
             # Plot Magnitude on primary y-axis
-            self.ax3.plot(freqs, mag_db, color='#3daee9', linewidth=2)
+            line_mag = self.ax3.plot(freqs, mag_db, color='#3daee9', linewidth=2, label="Magnitude")
             self.ax3.set_ylabel("Magnitude (dB)", color='#3daee9', fontweight='bold')
             self.ax3.tick_params(axis='y', colors='#3daee9')
             self.ax3.set_ylim(max(-80, np.min(mag_db)-5), max(5, np.max(mag_db)+5))
             
             # Plot Phase on secondary y-axis
-            self.ax3_phase.plot(freqs, phase_deg, color='#ffaa00', linewidth=1.5, linestyle='--')
+            line_phase = self.ax3_phase.plot(freqs, phase_deg, color='#ffaa00', linewidth=1.5, linestyle='--', label="Phase")
             self.ax3_phase.set_ylabel("Phase (Degrees)", color='#ffaa00', fontweight='bold')
+            
+            # FIX: Force the phase label back to the right side after ax.clear()
+            self.ax3_phase.yaxis.set_label_position("right")
+            
             self.ax3_phase.tick_params(axis='y', colors='#ffaa00')
             
             self.ax3.set_title(f"{filter_type} Filter Frequency Response (Magnitude & Phase)", fontweight='bold', color='white')
+
+            # Create a combined unified legend with a transparent background
+            lines = line_mag + line_phase
+            labels = [l.get_label() for l in lines]
+            self.ax3.legend(lines, labels, loc='best', fontsize=8, framealpha=0.6)
         else:
             self.ax3.set_title("Filter Frequency Response (No Filter Selected)", fontweight='bold', color='gray')
             self.ax3.set_ylabel("Magnitude (dB)", color='gray')
             self.ax3_phase.set_ylabel("Phase (Degrees)", color='gray')
+            
+            # FIX: Force the phase label back to the right side when no filter is selected too
+            self.ax3_phase.yaxis.set_label_position("right")
 
         self.ax3.set_xlabel("Frequency (Hz)")
         self.ax3.set_xlim(0, sampling_frequency / 2) # Show up to the Nyquist limit
         self.ax3.grid(True, linestyle='--', alpha=0.3)
 
+        # Dynamic layout recalculation to prevent left-side overlap of the Y-axis texts
+        self.fig.tight_layout(pad=3.0)
         self.canvas.draw()
 
 if __name__ == "__main__":
