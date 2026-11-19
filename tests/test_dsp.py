@@ -468,3 +468,40 @@ def test_invalid_filter_family_parameters_raise_value_error(kwargs):
         dsp_utils.apply_digital_filter(
             np.ones(1000), 1000, "Lowpass", 30, 0, **kwargs
         )
+
+
+def test_spectrogram_tracks_frequency_change_over_time():
+    fs = 1000
+    time = np.arange(0, 2, 1 / fs)
+    signal = np.where(
+        time < 1,
+        np.sin(2 * np.pi * 50 * time),
+        np.sin(2 * np.pi * 200 * time),
+    )
+
+    frequencies, times, power_db = dsp_utils.compute_spectrogram(
+        signal, fs, nperseg=256, overlap=0.5
+    )
+
+    early = np.argmin(np.abs(times - 0.25))
+    late = np.argmin(np.abs(times - 1.75))
+    early_frequency = frequencies[np.argmax(power_db[:, early])]
+    late_frequency = frequencies[np.argmax(power_db[:, late])]
+    assert early_frequency == pytest.approx(50, abs=5)
+    assert late_frequency == pytest.approx(200, abs=5)
+    assert power_db.shape == (frequencies.size, times.size)
+    assert frequencies[-1] == pytest.approx(fs / 2)
+
+
+@pytest.mark.parametrize(
+    ("fs", "nperseg", "overlap"),
+    [
+        (0, 256, 0.5),
+        (1000, 3000, 0.5),
+        (1000, 256, -0.1),
+        (1000, 256, 1.0),
+    ],
+)
+def test_spectrogram_rejects_invalid_parameters(fs, nperseg, overlap):
+    with pytest.raises(ValueError):
+        dsp_utils.compute_spectrogram(np.ones(1000), fs, nperseg, overlap)

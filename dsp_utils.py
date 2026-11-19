@@ -10,6 +10,7 @@ from scipy.signal import (
     freqz,
     lfilter,
 )
+from scipy.signal import spectrogram
 
 
 SIGNAL_TYPES = ("Sine", "Cosine", "Square", "Sawtooth", "Triangular")
@@ -325,3 +326,37 @@ def compute_comparison(original, filtered):
         "attenuation_db": attenuation_db,
         "rms_reduction_percent": rms_reduction_percent,
     }
+
+
+def compute_spectrogram(signal, fs, nperseg=256, overlap=0.5):
+    try:
+        samples = np.asarray(signal, dtype=float)
+    except (TypeError, ValueError) as err:
+        raise ValueError("Spectrogram signal must contain finite numeric samples.") from err
+    if samples.ndim != 1 or samples.size == 0:
+        raise ValueError("Spectrogram signal must be a non-empty one-dimensional array.")
+    if not np.all(np.isfinite(samples)):
+        raise ValueError("Spectrogram signal must contain only finite values.")
+    try:
+        sampling_frequency = float(fs)
+    except (TypeError, ValueError) as err:
+        raise ValueError("Sampling frequency must be a positive finite number.") from err
+    if not np.isfinite(sampling_frequency) or sampling_frequency <= 0:
+        raise ValueError("Sampling frequency must be a positive finite number.")
+    if not isinstance(nperseg, (int, np.integer)) or nperseg < 2:
+        raise ValueError("nperseg must be an integer of at least 2.")
+    if nperseg > samples.size:
+        raise ValueError("nperseg must not be larger than the signal.")
+    if not np.isfinite(overlap) or overlap < 0 or overlap >= 1:
+        raise ValueError("Overlap must be in the range [0, 1).")
+
+    noverlap = int(round(nperseg * overlap))
+    frequencies, times, power = spectrogram(
+        samples,
+        fs=sampling_frequency,
+        nperseg=nperseg,
+        noverlap=noverlap,
+        mode="psd",
+    )
+    power_db = 10.0 * np.log10(np.maximum(power, np.finfo(float).tiny))
+    return frequencies, times, power_db

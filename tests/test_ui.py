@@ -30,6 +30,8 @@ def test_app_starts_with_tabs_toolbar_and_initial_plot(window):
     assert window.toolbar is not None
     assert len(window.cursors) == 2
     assert window.last_export_data is not None
+    available_geometry = window.screen().availableGeometry()
+    assert available_geometry.contains(window.frameGeometry())
 
 
 def test_every_preset_can_be_applied_and_plotted(window):
@@ -639,3 +641,23 @@ def test_save_and_load_session_mocked_dialogs(window, tmp_path, monkeypatch):
     )
     window.load_session()
     assert window.sig_type_cb.currentText() == "Sine"
+
+
+def test_spectrogram_view_exists_and_updates(window):
+    assert hasattr(window, "spectrogram_axis")
+    window.update_timer.stop()
+    window.update_plot()
+    assert window.spectrogram_axis.collections
+    assert (
+        window.spectrogram_axis.get_position().y1
+        < window.ax4.get_position().y0
+    )
+    colorbar_position = window.spectrogram_colorbar_axis.get_position()
+    window.update_plot()
+    assert window.spectrogram_colorbar_axis.get_position().bounds == pytest.approx(
+        colorbar_position.bounds
+    )
+
+
+def test_chirp_preset_exists(window):
+    assert "Chirp" in SignalDashboard.PRESETS

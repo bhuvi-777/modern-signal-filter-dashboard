@@ -38,6 +38,7 @@ from dsp_utils import (
     compute_comparison,
     compute_measurements,
     compute_snr_db,
+    compute_spectrogram,
     compute_spectrum,
     generate_signal,
 )
@@ -86,6 +87,17 @@ class SignalDashboard(QMainWindow):
             "noise": 0.03,
             "distortion": 5,
         },
+        "Chirp": {
+            "signal": "Sine",
+            "frequency": "100.0",
+            "sampling": "1000.0",
+            "duration": "1.0",
+            "filter": "None",
+            "cutoff1": "15.0",
+            "cutoff2": "25.0",
+            "noise": 0,
+            "distortion": 0,
+        },
         "Nyquist Warning": {
             "signal": "Sine",
             "frequency": "30.0",
@@ -102,7 +114,18 @@ class SignalDashboard(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Modern Signal & Filter Dashboard (PyQt6)")
-        self.resize(1250, 950)
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1250, 950)
+        else:
+            available_geometry = screen.availableGeometry()
+            width = min(1250, int(available_geometry.width() * 0.95))
+            height = min(950, int(available_geometry.height() * 0.95))
+            self.resize(width, height)
+            self.move(
+                available_geometry.x() + (available_geometry.width() - width) // 2,
+                available_geometry.y() + (available_geometry.height() - height) // 2,
+            )
         self.last_export_data = None
         self.dark_theme = True
 
@@ -306,9 +329,18 @@ class SignalDashboard(QMainWindow):
         plot_layout = QVBoxLayout(plot_frame)
         plot_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.fig, (self.ax1, self.ax2, self.ax3, self.ax4) = plt.subplots(
-            4, 1, figsize=(7, 12)
+        self.fig = plt.figure(figsize=(7, 8))
+        plot_grid = self.fig.add_gridspec(
+            5,
+            2,
+            height_ratios=(1, 1, 1, 1, 0.8),
+            width_ratios=(1, 0.025),
         )
+        self.ax1, self.ax2, self.ax3, self.ax4 = (
+            self.fig.add_subplot(plot_grid[row, :]) for row in range(4)
+        )
+        self.spectrogram_axis = self.fig.add_subplot(plot_grid[4, 0])
+        self.spectrogram_colorbar_axis = self.fig.add_subplot(plot_grid[4, 1])
         self.ax3_phase = self.ax3.twinx()
 
         self.canvas = FigureCanvas(self.fig)
@@ -1156,6 +1188,47 @@ class SignalDashboard(QMainWindow):
         self.ax4.set_ylabel("Amplitude", color=foreground)
         self.ax4.set_xlim(0, sampling_frequency / 2)
         self.ax4.grid(True, color=grid_color, linestyle="--", alpha=0.3)
+
+        try:
+            ui_nperseg = min(256, y_samp_filtered.size)
+            if ui_nperseg < 2:
+                ui_nperseg = 2
+            spectrogram_freqs, spectrogram_times, spectrogram_power = compute_spectrogram(
+                y_samp_filtered,
+                sampling_frequency,
+                nperseg=ui_nperseg,
+            )
+            self.spectrogram_axis.clear()
+            mesh = self.spectrogram_axis.pcolormesh(
+                spectrogram_times,
+                spectrogram_freqs,
+                spectrogram_power,
+                shading="auto",
+                cmap="viridis",
+            )
+            if hasattr(self, "spectrogram_colorbar"):
+                self.spectrogram_colorbar.update_normal(mesh)
+            else:
+                self.spectrogram_colorbar = self.fig.colorbar(
+                    mesh,
+                    cax=self.spectrogram_colorbar_axis,
+                )
+                self.spectrogram_colorbar.set_label("Power (dB)")
+            self.spectrogram_axis.set_facecolor(background)
+            self.spectrogram_axis.tick_params(colors=foreground, labelsize=8)
+            self.spectrogram_axis.xaxis.label.set_color(foreground)
+            self.spectrogram_axis.yaxis.label.set_color(foreground)
+            self.spectrogram_axis.title.set_color(foreground)
+            self.spectrogram_axis.set_title(
+                "Spectrogram", fontweight="bold", color=foreground
+            )
+            self.spectrogram_axis.set_xlabel("Time (s)", color=foreground)
+            self.spectrogram_axis.set_ylabel("Frequency (Hz)", color=foreground)
+            self.spectrogram_axis.set_ylim(0, sampling_frequency / 2)
+            mesh.set_rasterized(True)
+        except ValueError as err:
+            self.set_status(f"Invalid input: {err}", "error")
+            return
 
         self.last_export_data = (t_samp, y_samp_primary, y_samp_filtered)
         for cursor in self.cursors:

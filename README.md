@@ -13,6 +13,12 @@ This project lets you:
 - Compare original and filtered signals
 - Inspect filter magnitude and phase response
 - Check whether the selected sampling rate satisfies the Nyquist criterion
+- View RMS, peak, peak-to-peak, mean, crest factor, peak frequency, THD, and SNR measurements
+- Compare original and filtered RMS, attenuation, and reduction
+- Choose Butterworth, Chebyshev I/II, Elliptic, Bessel, or windowed FIR filtering
+- Import signal CSV files or export sampled data
+- Save/load complete sessions and create named presets
+- Inspect an output spectrogram
 
 ## Features
 
@@ -28,6 +34,10 @@ This project lets you:
 - Preset configurations for common DSP scenarios
 - PNG/PDF plot export and CSV signal-data export
 - Adjustable digital filter order
+- Measurement panel and original-versus-filtered comparison
+- Filter families and FIR window/tap controls
+- CSV import and session save/load with presets
+- Spectrogram view and chirp preset
 - Tabbed controls with an in-app help panel
 - Light/dark theme toggle
 - Plot pan/zoom toolbar, crosshair, and coordinate readout
@@ -49,6 +59,8 @@ From the project directory, run:
 ```bash
 python pyqt_dashboard.py
 ```
+
+The dashboard opens centered and sized to fit the available screen area.
 
 ## Run Tests
 
