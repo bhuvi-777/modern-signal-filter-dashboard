@@ -298,3 +298,70 @@ def test_spectrum_does_not_modify_input():
     dsp_utils.compute_spectrum(signal, FS)
 
     np.testing.assert_array_equal(signal, original)
+
+
+def test_measurements_sine_rms_crest_and_mean():
+    time = np.arange(0, 2, 1 / FS)
+    signal = np.sin(2 * np.pi * 50 * time)
+
+    measurements = dsp_utils.compute_measurements(signal, FS)
+
+    assert measurements["rms"] == pytest.approx(1 / np.sqrt(2), rel=0.02)
+    assert measurements["crest_factor"] == pytest.approx(np.sqrt(2), rel=0.02)
+    assert measurements["mean"] == pytest.approx(0, abs=0.02)
+    assert measurements["peak_frequency_hz"] == pytest.approx(50, abs=1)
+
+
+def test_measurements_square_and_constant():
+    time = np.arange(0, 1, 1 / FS)
+    square = np.sign(np.sin(2 * np.pi * 5 * time))
+    constant = np.full(100, 3.0)
+
+    square_measurements = dsp_utils.compute_measurements(square, FS)
+    constant_measurements = dsp_utils.compute_measurements(constant, FS)
+
+    assert square_measurements["rms"] == pytest.approx(1, rel=0.002)
+    assert square_measurements["crest_factor"] == pytest.approx(1, rel=0.002)
+    assert constant_measurements["mean"] == pytest.approx(3)
+    assert constant_measurements["rms"] == pytest.approx(3)
+    assert constant_measurements["peak_to_peak"] == pytest.approx(0)
+
+
+def test_snr_matches_20_db_sine_noise():
+    time = np.arange(0, 2, 1 / FS)
+    clean = np.sin(2 * np.pi * 50 * time)
+    noise = 0.1 * np.sin(2 * np.pi * 123 * time)
+
+    snr_db = dsp_utils.compute_snr_db(clean, clean + noise)
+
+    assert snr_db == pytest.approx(20, abs=0.5)
+
+
+def test_thd_pure_sine_and_square():
+    fs = 10000
+    time = np.arange(0, 2, 1 / fs)
+    sine = np.sin(2 * np.pi * 50 * time)
+    square = np.sign(np.sin(2 * np.pi * 50 * time))
+
+    sine_thd = dsp_utils.compute_thd(sine, fs, 50)
+    square_thd = dsp_utils.compute_thd(square, fs, 50)
+
+    assert sine_thd == pytest.approx(0, abs=0.01)
+    ideal_limit = np.sqrt(np.pi**2 / 8 - 1)
+    assert square_thd == pytest.approx(ideal_limit, rel=0.05)
+
+
+@pytest.mark.parametrize(
+    ("function", "arguments"),
+    [
+        (dsp_utils.compute_measurements, (np.array([]), FS)),
+        (dsp_utils.compute_measurements, (np.array([1, np.nan]), FS)),
+        (dsp_utils.compute_measurements, (np.array([1, np.inf]), FS)),
+        (dsp_utils.compute_measurements, (np.ones(10), 0)),
+        (dsp_utils.compute_snr_db, (np.zeros(10), np.zeros(10))),
+        (dsp_utils.compute_snr_db, (np.ones(10), np.ones(10))),
+    ],
+)
+def test_measurement_invalid_inputs_raise_value_error(function, arguments):
+    with pytest.raises(ValueError):
+        function(*arguments)

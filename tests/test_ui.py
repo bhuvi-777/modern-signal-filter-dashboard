@@ -524,3 +524,23 @@ def test_plot_resize_handles_are_visible_and_legends_are_draggable(window):
 
     window._set_plot_divider_hover(1)
     assert window._plot_divider_artists[1][1].get_visible()
+
+
+def test_measurements_panel_is_present_and_updated(window):
+    assert hasattr(window, "measurement_label")
+    window.update_plot()
+    text = window.measurement_label.text()
+    assert "RMS:" in text
+    assert "Peak:" in text
+    assert "Peak-to-peak:" in text
+    assert "Mean:" in text
+    assert "Crest factor:" in text
+    assert "Peak frequency:" in text
+
+
+def test_measurements_panel_shows_snr_when_noise_is_on(window):
+    window.noise_entry.setText("0.10")
+    window.update_timer.stop()
+    window.update_plot()
+
+    assert "SNR:" in window.measurement_label.text()

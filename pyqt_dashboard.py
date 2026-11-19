@@ -35,6 +35,8 @@ from dsp_utils import (
     add_noise_and_distortion,
     apply_digital_filter,
     calculate_frequency_response,
+    compute_measurements,
+    compute_snr_db,
     compute_spectrum,
     generate_signal,
 )
@@ -241,6 +243,10 @@ class SignalDashboard(QMainWindow):
         self.cursor_label = QLabel("Move over a time plot to inspect coordinates.")
         self.cursor_label.setWordWrap(True)
         sidebar_layout.addWidget(self.cursor_label)
+        self.measurement_label = QLabel("Measurements:")
+        self.measurement_label.setWordWrap(True)
+        self.measurement_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        sidebar_layout.addWidget(self.measurement_label)
 
         plot_frame = QFrame()
         plot_frame.setMinimumWidth(400)
@@ -794,6 +800,7 @@ class SignalDashboard(QMainWindow):
         primary_type = self.sig_type_cb.currentText()
         y_cont_primary = generate_signal(t_cont, signal_frequency, primary_type)
         y_samp_primary = generate_signal(t_samp, signal_frequency, primary_type)
+        y_samp_clean = y_samp_primary.copy()
         y_cont_primary = add_noise_and_distortion(
             y_cont_primary, noise_amount, distortion_amount
         )
@@ -829,6 +836,28 @@ class SignalDashboard(QMainWindow):
             spectrum_frequencies, spectrum_amplitude = compute_spectrum(
                 y_samp_filtered, sampling_frequency
             )
+        except ValueError as err:
+            self.set_status(f"Invalid input: {err}", "error")
+            return
+
+        try:
+            measurements = compute_measurements(y_samp_filtered, sampling_frequency)
+            measurement_text = (
+                "Measurements:\n"
+                f"RMS: {measurements['rms']:.6g}\n"
+                f"Peak: {measurements['peak']:.6g}\n"
+                f"Peak-to-peak: {measurements['peak_to_peak']:.6g}\n"
+                f"Mean: {measurements['mean']:.6g}\n"
+                f"Crest factor: {measurements['crest_factor']:.6g}\n"
+                f"Peak frequency: {measurements['peak_frequency_hz']:g} Hz"
+            )
+            if noise_amount > 0:
+                try:
+                    snr_db = compute_snr_db(y_samp_clean, y_samp_primary)
+                    measurement_text += f"\nSNR: {snr_db:.6g} dB"
+                except ValueError:
+                    measurement_text += "\nSNR: unavailable"
+            self.measurement_label.setText(measurement_text)
         except ValueError as err:
             self.set_status(f"Invalid input: {err}", "error")
             return

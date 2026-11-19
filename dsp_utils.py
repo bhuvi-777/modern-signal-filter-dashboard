@@ -115,3 +115,85 @@ def compute_spectrum(signal, fs):
 
     frequencies = np.fft.rfftfreq(samples.size, d=1.0 / sampling_frequency)
     return frequencies, amplitude
+
+
+def _validate_measurement_signal(signal, fs):
+    try:
+        samples = np.asarray(signal, dtype=float)
+    except (TypeError, ValueError) as err:
+        raise ValueError("Signal must contain finite numeric samples.") from err
+    if samples.ndim != 1:
+        raise ValueError("Signal must be a one-dimensional array.")
+    if samples.size == 0:
+        raise ValueError("Signal must not be empty.")
+    if not np.all(np.isfinite(samples)):
+        raise ValueError("Signal samples must be finite (no NaN or infinity).")
+    try:
+        sampling_frequency = float(fs)
+    except (TypeError, ValueError) as err:
+        raise ValueError("Sampling frequency must be a positive finite number.") from err
+    if not np.isfinite(sampling_frequency) or sampling_frequency <= 0:
+        raise ValueError("Sampling frequency must be a positive finite number.")
+    return samples, sampling_frequency
+
+
+def compute_measurements(signal, fs):
+    samples, sampling_frequency = _validate_measurement_signal(signal, fs)
+    rms = float(np.sqrt(np.mean(samples * samples)))
+    peak = float(np.max(np.abs(samples)))
+    peak_to_peak = float(np.max(samples) - np.min(samples))
+    mean = float(np.mean(samples))
+    crest_factor = float(peak / rms) if rms > 0 else 0.0
+
+    frequencies, amplitude = compute_spectrum(samples, sampling_frequency)
+    peak_frequency = float(frequencies[int(np.argmax(amplitude))])
+    return {
+        "rms": rms,
+        "peak": peak,
+        "peak_to_peak": peak_to_peak,
+        "mean": mean,
+        "crest_factor": crest_factor,
+        "peak_frequency_hz": peak_frequency,
+    }
+
+
+def compute_snr_db(clean, noisy):
+    clean_samples, _ = _validate_measurement_signal(clean, 1.0)
+    noisy_samples, _ = _validate_measurement_signal(noisy, 1.0)
+    if clean_samples.size != noisy_samples.size:
+        raise ValueError("Clean and noisy signals must have the same number of samples.")
+
+    clean_power = float(np.mean(clean_samples * clean_samples))
+    noise = noisy_samples - clean_samples
+    noise_power = float(np.mean(noise * noise))
+    if clean_power <= 0:
+        raise ValueError("Clean signal must have non-zero power.")
+    if noise_power <= 0:
+        raise ValueError("Noise power must be greater than zero.")
+    return float(10.0 * np.log10(clean_power / noise_power))
+
+
+def compute_thd(signal, fs, fundamental_hz, n_harmonics=10):
+    samples, sampling_frequency = _validate_measurement_signal(signal, fs)
+    if not np.isfinite(fundamental_hz) or fundamental_hz <= 0:
+        raise ValueError("Fundamental frequency must be a positive finite number.")
+    if fundamental_hz >= sampling_frequency / 2:
+        raise ValueError("Fundamental frequency must be below the Nyquist frequency.")
+    if not isinstance(n_harmonics, (int, np.integer)) or n_harmonics < 1:
+        raise ValueError("Number of harmonics must be a positive integer.")
+
+    frequencies, amplitude = compute_spectrum(samples, sampling_frequency)
+    fundamental_index = int(np.argmin(np.abs(frequencies - fundamental_hz)))
+    fundamental_amplitude = amplitude[fundamental_index]
+    if fundamental_amplitude <= 0:
+        raise ValueError("Fundamental signal amplitude must be greater than zero.")
+
+    harmonic_power = 0.0
+    max_harmonic = int(sampling_frequency / (2 * fundamental_hz))
+    for harmonic in range(2, max_harmonic + 1):
+        harmonic_frequency = harmonic * fundamental_hz
+        if harmonic_frequency > sampling_frequency / 2:
+            break
+        harmonic_index = int(np.argmin(np.abs(frequencies - harmonic_frequency)))
+        harmonic_power += float(amplitude[harmonic_index] ** 2)
+    return float(np.sqrt(harmonic_power) / fundamental_amplitude)
