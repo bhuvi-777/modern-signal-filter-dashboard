@@ -184,6 +184,31 @@ class SignalDashboard(QMainWindow):
         self.order_combo.addItems(["2", "4", "6", "8"])
         self.order_combo.setCurrentText("4")
         filter_layout.addWidget(self.order_combo)
+
+        filter_layout.addWidget(QLabel("Filter Family:"))
+        self.family_cb = QComboBox()
+        self.family_cb.addItems([
+            "Butterworth",
+            "Chebyshev I",
+            "Chebyshev II",
+            "Elliptic",
+            "Bessel",
+            "FIR",
+        ])
+        filter_layout.addWidget(self.family_cb)
+        self.ripple_entry = QLineEdit("1.0")
+        self.stopband_entry = QLineEdit("40.0")
+        self.fir_taps_entry = QLineEdit("101")
+        filter_layout.addWidget(QLabel("Ripple (dB):"))
+        filter_layout.addWidget(self.ripple_entry)
+        filter_layout.addWidget(QLabel("Stopband attenuation (dB):"))
+        filter_layout.addWidget(self.stopband_entry)
+        filter_layout.addWidget(QLabel("FIR window:"))
+        self.fir_window_cb = QComboBox()
+        self.fir_window_cb.addItems(["Hamming", "Hann", "Blackman"])
+        filter_layout.addWidget(self.fir_window_cb)
+        filter_layout.addWidget(QLabel("FIR taps:"))
+        filter_layout.addWidget(self.fir_taps_entry)
         filter_layout.addStretch()
 
         effects_layout.addWidget(QLabel("Signal Overlays:"))
@@ -298,6 +323,7 @@ class SignalDashboard(QMainWindow):
 
         self.preset_cb.currentTextChanged.connect(self.apply_preset)
         self.filter_cb.currentTextChanged.connect(self.on_filter_change)
+        self.family_cb.currentTextChanged.connect(self.on_filter_change)
         self.update_btn.clicked.connect(self.update_plot)
         self.export_plot_btn.clicked.connect(self.export_plot)
         self.export_csv_btn.clicked.connect(self.export_csv)
@@ -682,6 +708,12 @@ class SignalDashboard(QMainWindow):
         self.cutoff1_slider.setEnabled(enabled)
         self.cutoff2_entry.setEnabled(band)
         self.cutoff2_slider.setEnabled(band)
+        family = self.family_cb.currentText()
+        self.ripple_entry.setEnabled(family in ("Chebyshev I", "Elliptic"))
+        self.stopband_entry.setEnabled(family in ("Chebyshev II", "Elliptic"))
+        fir = family == "FIR"
+        self.fir_window_cb.setEnabled(fir)
+        self.fir_taps_entry.setEnabled(fir)
         self.schedule_update()
 
     def apply_preset(self, name):
@@ -769,6 +801,23 @@ class SignalDashboard(QMainWindow):
                 else 0.0
             )
             filter_order = int(self.order_combo.currentText())
+            family = self.family_cb.currentText()
+            ripple_db = (
+                self._parse_finite_number(self.ripple_entry.text(), "Ripple")
+                if family in ("Chebyshev I", "Elliptic")
+                else 1.0
+            )
+            stopband_db = (
+                self._parse_finite_number(
+                    self.stopband_entry.text(), "Stopband attenuation"
+                )
+                if family in ("Chebyshev II", "Elliptic")
+                else 40.0
+            )
+            try:
+                fir_taps = int(self.fir_taps_entry.text())
+            except ValueError as err:
+                raise ValueError("FIR taps must be an integer.") from err
             estimated_sample_count = duration * sampling_frequency
             if not math.isfinite(estimated_sample_count) or estimated_sample_count > 1_000_000:
                 raise ValueError(
@@ -817,6 +866,11 @@ class SignalDashboard(QMainWindow):
                 cutoff1,
                 cutoff2,
                 filter_order,
+                family,
+                ripple_db,
+                stopband_db,
+                self.fir_window_cb.currentText(),
+                fir_taps,
             )
             y_samp_filtered, b, a = apply_digital_filter(
                 y_samp_primary,
@@ -825,6 +879,11 @@ class SignalDashboard(QMainWindow):
                 cutoff1,
                 cutoff2,
                 filter_order,
+                family,
+                ripple_db,
+                stopband_db,
+                self.fir_window_cb.currentText(),
+                fir_taps,
             )
         except ValueError as err:
             self.set_status(

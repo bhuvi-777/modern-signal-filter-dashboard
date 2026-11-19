@@ -1,5 +1,15 @@
 import numpy as np
-from scipy.signal import butter, filtfilt, freqz
+from scipy.signal import (
+    bessel,
+    butter,
+    cheby1,
+    cheby2,
+    ellip,
+    filtfilt,
+    firwin,
+    freqz,
+    lfilter,
+)
 
 
 SIGNAL_TYPES = ("Sine", "Cosine", "Square", "Sawtooth", "Triangular")
@@ -35,9 +45,33 @@ def add_noise_and_distortion(signal, noise_amount=0.0, distortion_amount=0.0, se
     return result
 
 
-def apply_digital_filter(signal, sampling_frequency, filter_type, cutoff1, cutoff2, order=4):
+def apply_digital_filter(
+    signal,
+    sampling_frequency,
+    filter_type,
+    cutoff1,
+    cutoff2,
+    order=4,
+    family="Butterworth",
+    ripple_db=1.0,
+    stopband_db=40.0,
+    fir_window="Hamming",
+    fir_taps=101,
+):
     if filter_type == "None":
         return np.asarray(signal, dtype=float).copy(), None, None
+
+    if family not in ("Butterworth", "Chebyshev I", "Chebyshev II", "Elliptic", "Bessel", "FIR"):
+        raise ValueError(f"Unknown filter family: {family}.")
+    if ripple_db is not None and (not np.isfinite(ripple_db) or ripple_db <= 0):
+        if family in ("Chebyshev I", "Elliptic"):
+            raise ValueError("Ripple must be greater than 0 dB.")
+    if stopband_db is not None and (not np.isfinite(stopband_db) or stopband_db <= 0):
+        if family in ("Chebyshev II", "Elliptic"):
+            raise ValueError("Stopband attenuation must be greater than 0 dB.")
+    if family == "FIR":
+        if not isinstance(fir_taps, (int, np.integer)):
+            raise ValueError("FIR taps must be an integer.")
 
     nyquist = 0.5 * sampling_frequency
     try:
@@ -49,7 +83,37 @@ def apply_digital_filter(signal, sampling_frequency, filter_type, cutoff1, cutof
                     f"{filter_type} cutoff ({cutoff1:g} Hz) must be below "
                     f"the Nyquist frequency ({nyquist:g} Hz)."
                 )
-            b, a = butter(order, cutoff1 / nyquist, btype=filter_type.lower())
+            normalized_cutoff = cutoff1 / nyquist
+            if family == "Butterworth":
+                b, a = butter(order, normalized_cutoff, btype=filter_type.lower())
+            elif family == "Chebyshev I":
+                if ripple_db <= 0:
+                    raise ValueError("Chebyshev I ripple must be greater than 0 dB.")
+                b, a = cheby1(order, ripple_db, normalized_cutoff, btype=filter_type.lower())
+            elif family == "Chebyshev II":
+                if stopband_db <= 0:
+                    raise ValueError("Chebyshev II stopband attenuation must be greater than 0 dB.")
+                b, a = cheby2(order, stopband_db, normalized_cutoff, btype=filter_type.lower())
+            elif family == "Elliptic":
+                if ripple_db <= 0:
+                    raise ValueError("Elliptic ripple must be greater than 0 dB.")
+                if stopband_db <= 0:
+                    raise ValueError("Elliptic stopband attenuation must be greater than 0 dB.")
+                b, a = ellip(order, ripple_db, stopband_db, normalized_cutoff, btype=filter_type.lower())
+            elif family == "Bessel":
+                b, a = bessel(order, normalized_cutoff, btype=filter_type.lower())
+            elif family == "FIR":
+                if fir_taps < 3:
+                    raise ValueError("FIR taps must be at least 3.")
+                if fir_taps % 2 == 0:
+                    fir_taps += 1
+                if fir_window.lower() not in ("hamming", "hann", "blackman"):
+                    raise ValueError("Unknown FIR window; use Hamming, Hann, or Blackman.")
+                b = firwin(fir_taps, normalized_cutoff, window=fir_window.lower(),
+                           pass_zero=filter_type.lower() == "lowpass")
+                a = np.array([1.0])
+            else:
+                raise ValueError(f"Unknown filter family: {family}.")
         elif filter_type in ("Bandpass", "Bandstop"):
             low, high = sorted((cutoff1, cutoff2))
             if low <= 0:
@@ -61,7 +125,37 @@ def apply_digital_filter(signal, sampling_frequency, filter_type, cutoff1, cutof
                     f"High cutoff ({high:g} Hz) must be below "
                     f"the Nyquist frequency ({nyquist:g} Hz)."
                 )
-            b, a = butter(order, [low / nyquist, high / nyquist], btype=filter_type.lower())
+            normalized = [low / nyquist, high / nyquist]
+            if family == "Butterworth":
+                b, a = butter(order, normalized, btype=filter_type.lower())
+            elif family == "Chebyshev I":
+                if ripple_db <= 0:
+                    raise ValueError("Chebyshev I ripple must be greater than 0 dB.")
+                b, a = cheby1(order, ripple_db, normalized, btype=filter_type.lower())
+            elif family == "Chebyshev II":
+                if stopband_db <= 0:
+                    raise ValueError("Chebyshev II stopband attenuation must be greater than 0 dB.")
+                b, a = cheby2(order, stopband_db, normalized, btype=filter_type.lower())
+            elif family == "Elliptic":
+                if ripple_db <= 0:
+                    raise ValueError("Elliptic ripple must be greater than 0 dB.")
+                if stopband_db <= 0:
+                    raise ValueError("Elliptic stopband attenuation must be greater than 0 dB.")
+                b, a = ellip(order, ripple_db, stopband_db, normalized, btype=filter_type.lower())
+            elif family == "Bessel":
+                b, a = bessel(order, normalized, btype=filter_type.lower())
+            elif family == "FIR":
+                if fir_taps < 3:
+                    raise ValueError("FIR taps must be at least 3.")
+                if fir_taps % 2 == 0:
+                    fir_taps += 1
+                if fir_window.lower() not in ("hamming", "hann", "blackman"):
+                    raise ValueError("Unknown FIR window; use Hamming, Hann, or Blackman.")
+                b = firwin(fir_taps, normalized, window=fir_window.lower(),
+                           pass_zero=filter_type.lower() == "bandstop")
+                a = np.array([1.0])
+            else:
+                raise ValueError(f"Unknown filter family: {family}.")
         else:
             return np.asarray(signal, dtype=float).copy(), None, None
 
@@ -71,6 +165,8 @@ def apply_digital_filter(signal, sampling_frequency, filter_type, cutoff1, cutof
                 f"Order {order} requires more than {pad_length} samples for "
                 f"{filter_type} filtering; increase duration or sampling rate."
             )
+        if family in ("Chebyshev I", "Chebyshev II", "Elliptic", "Bessel"):
+            return lfilter(b, a, signal), b, a
         return filtfilt(b, a, signal), b, a
     except ValueError as err:
         raise ValueError(f"Filter configuration error:\n{err}") from err

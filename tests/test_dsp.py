@@ -405,3 +405,66 @@ def test_comparison_zero_filtered_signal_is_reported_as_complete_reduction():
 def test_comparison_rejects_zero_original_and_mismatched_lengths(original, filtered):
     with pytest.raises(ValueError):
         dsp_utils.compute_comparison(original, filtered)
+
+
+@pytest.mark.parametrize(
+    "family",
+    ["Butterworth", "Chebyshev I", "Chebyshev II", "Elliptic", "Bessel", "FIR"],
+)
+def test_new_filter_families_reject_200_hz_and_keep_5_hz(family):
+    fs = 1000
+    time = np.arange(0, 2, 1 / fs)
+    signal = np.sin(2 * np.pi * 5 * time) + np.sin(2 * np.pi * 200 * time)
+
+    filtered, _, _ = dsp_utils.apply_digital_filter(
+        signal, fs, "Lowpass", 30, 0, order=4,
+        family=family, ripple_db=1, stopband_db=40,
+        fir_window="Hamming", fir_taps=101,
+    )
+
+    frequencies, amplitude = dsp_utils.compute_spectrum(filtered, fs)
+    low_index = np.argmin(np.abs(frequencies - 5))
+    high_index = np.argmin(np.abs(frequencies - 200))
+    input_spectrum = dsp_utils.compute_spectrum(signal, fs)[1]
+    assert amplitude[high_index] < 0.01 * input_spectrum[high_index]
+    assert amplitude[low_index] > 0.9 * input_spectrum[low_index]
+
+
+@pytest.mark.parametrize("band_type", ["Lowpass", "Highpass", "Bandpass", "Bandstop"])
+@pytest.mark.parametrize(
+    "family",
+    ["Butterworth", "Chebyshev I", "Chebyshev II", "Elliptic", "Bessel", "FIR"],
+)
+def test_every_family_supports_every_band_type(family, band_type):
+    fs = 1000
+    signal = np.sin(2 * np.pi * 100 * np.arange(0, 1, 1 / fs))
+    cutoff2 = 120 if band_type in ("Bandpass", "Bandstop") else 0
+
+    filtered, b, a = dsp_utils.apply_digital_filter(
+        signal, fs, band_type, 80, cutoff2, order=4,
+        family=family, ripple_db=1, stopband_db=40,
+        fir_window="Hamming", fir_taps=101,
+    )
+
+    assert filtered.shape == signal.shape
+    assert b is not None
+    assert a is not None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"family": "Unknown"},
+        {"family": "Chebyshev I", "ripple_db": 0},
+        {"family": "Chebyshev II", "stopband_db": 0},
+        {"family": "Elliptic", "ripple_db": 0},
+        {"family": "Elliptic", "stopband_db": 0},
+        {"family": "FIR", "fir_taps": 2},
+        {"family": "FIR", "fir_window": "Triangle"},
+    ],
+)
+def test_invalid_filter_family_parameters_raise_value_error(kwargs):
+    with pytest.raises(ValueError):
+        dsp_utils.apply_digital_filter(
+            np.ones(1000), 1000, "Lowpass", 30, 0, **kwargs
+        )

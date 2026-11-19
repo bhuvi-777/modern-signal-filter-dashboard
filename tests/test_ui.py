@@ -555,3 +555,38 @@ def test_measurements_panel_shows_original_filtered_comparison(window):
     assert "Filtered RMS:" in text
     assert "Attenuation:" in text
     assert "RMS reduction:" in text
+
+
+@pytest.mark.parametrize(
+    "family",
+    ["Butterworth", "Chebyshev I", "Chebyshev II", "Elliptic", "Bessel", "FIR"],
+)
+def test_filter_family_updates_plot(window, family):
+    window.samp_freq_entry.setText("1000")
+    window.duration_entry.setText("1")
+    window.filter_cb.setCurrentText("Lowpass")
+    window.family_cb.setCurrentText(family)
+    window.ripple_entry.setText("1")
+    window.stopband_entry.setText("40")
+    window.fir_taps_entry.setText("101")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert "Invalid input" not in window.status_label.text()
+    assert window.ax3.lines
+
+
+def test_filter_family_extra_fields_enable_relevant_controls(window):
+    window.filter_cb.setCurrentText("Lowpass")
+    window.family_cb.setCurrentText("Chebyshev I")
+    assert window.ripple_entry.isEnabled()
+    assert not window.stopband_entry.isEnabled()
+
+    window.family_cb.setCurrentText("Elliptic")
+    assert window.ripple_entry.isEnabled()
+    assert window.stopband_entry.isEnabled()
+
+    window.family_cb.setCurrentText("FIR")
+    assert window.fir_window_cb.isEnabled()
+    assert window.fir_taps_entry.isEnabled()
