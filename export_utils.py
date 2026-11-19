@@ -125,4 +125,56 @@ def load_session(path):
         raise ValueError(f"Unknown session version: {document['version']}.")
     if not isinstance(document["settings"], dict):
         raise ValueError("Session settings must be a dictionary.")
-    return document["settings"]
+    settings = document["settings"]
+
+    string_keys = (
+        "waveform", "filter_family", "filter_type", "theme",
+        "fir_window",
+    )
+    for key in string_keys:
+        if key in settings and not isinstance(settings[key], str):
+            raise ValueError(f"Session setting '{key}' must be a string.")
+    if "order" in settings:
+        if type(settings["order"]) is not int:
+            raise ValueError("Session setting 'order' must be an integer.")
+        if settings["order"] not in (2, 4, 6, 8):
+            raise ValueError("Session filter order is out of range.")
+    if "effects" in settings and not isinstance(settings["effects"], dict):
+        raise ValueError("Session setting 'effects' must be a dictionary.")
+    if "presets" in settings and not isinstance(settings["presets"], dict):
+        raise ValueError("Session setting 'presets' must be a dictionary.")
+
+    numeric_ranges = (
+        ("frequency", 0.0, 1_000_000.0),
+        ("sampling", 1e-12, 1_000_000.0),
+        ("duration", 1e-12, 3600.0),
+        ("cutoff1", 0.0, None),
+        ("cutoff2", 0.0, None),
+        ("ripple", 1e-12, None),
+        ("stopband", 1e-12, None),
+        ("noise", 0.0, 1.0),
+        ("distortion", 0.0, 100.0),
+    )
+    for key, minimum, maximum in numeric_ranges:
+        if key not in settings:
+            continue
+        try:
+            value = float(settings[key])
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Session setting '{key}' must be a number.") from err
+        if not math.isfinite(value) or value < minimum:
+            raise ValueError(f"Session setting '{key}' is out of range.")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"Session setting '{key}' is out of range.")
+
+    if "theme" in settings and settings["theme"] not in ("dark", "light"):
+        raise ValueError("Session theme must be 'dark' or 'light'.")
+    if "filter_family" in settings and settings["filter_family"] not in (
+        "Butterworth", "Chebyshev I", "Chebyshev II", "Elliptic", "Bessel", "FIR"
+    ):
+        raise ValueError("Unknown session filter family.")
+    if "filter_type" in settings and settings["filter_type"] not in (
+        "None", "Lowpass", "Highpass", "Bandpass", "Bandstop"
+    ):
+        raise ValueError("Unknown session filter type.")
+    return settings
