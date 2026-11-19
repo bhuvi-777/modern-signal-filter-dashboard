@@ -446,3 +446,81 @@ def test_spectrum_redraws_with_both_themes(window):
         (43 / 255, 43 / 255, 43 / 255)
     )
     assert window.ax4.xaxis.label.get_color() == "#ffffff"
+
+
+def test_sampled_output_markers_match_the_output_trace(window):
+    window.samp_freq_entry.setText("100")
+    window.sig_freq_entry.setText("5")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    trace = window.ax2.lines[0]
+    markers = window.ax2.lines[1]
+    np.testing.assert_array_equal(trace.get_xdata(), markers.get_xdata())
+    np.testing.assert_array_equal(trace.get_ydata(), markers.get_ydata())
+
+
+def test_sidebar_and_plot_pane_can_be_resized(window):
+    splitter = window.main_splitter
+    assert splitter.count() == 2
+
+    splitter.setSizes([300, 800])
+    narrow_sidebar_width = splitter.sizes()[0]
+    splitter.setSizes([500, 600])
+    wide_sidebar_width = splitter.sizes()[0]
+
+    assert wide_sidebar_width > narrow_sidebar_width
+
+
+def test_individual_plots_can_be_resized_and_reset(window):
+    upper_axis, lower_axis = window.ax1, window.ax2
+    initial_upper_height = upper_axis.get_position().height
+    initial_lower_height = lower_axis.get_position().height
+    upper_position = upper_axis.get_position()
+    lower_position = lower_axis.get_position()
+    figure_width, figure_height = window.fig.bbox.width, window.fig.bbox.height
+    event_x = (upper_position.x0 + upper_position.x1) * figure_width / 2
+    divider_y = (upper_position.y0 + lower_position.y1) * figure_height / 2
+
+    window._start_plot_resize(
+        SimpleNamespace(x=event_x, y=divider_y, button=1, dblclick=False)
+    )
+    window._update_plot_resize(
+        SimpleNamespace(x=event_x, y=divider_y - 60, button=1)
+    )
+    window._finish_plot_resize(
+        SimpleNamespace(x=event_x, y=divider_y - 60, button=1)
+    )
+
+    assert upper_axis.get_position().height != pytest.approx(initial_upper_height)
+    assert lower_axis.get_position().height != pytest.approx(initial_lower_height)
+    resized_upper_height = upper_axis.get_position().height
+    window.update_plot()
+    assert upper_axis.get_position().height == pytest.approx(resized_upper_height)
+
+    upper_position = upper_axis.get_position()
+    lower_position = lower_axis.get_position()
+    divider_y = (upper_position.y0 + lower_position.y1) * figure_height / 2
+    window._start_plot_resize(
+        SimpleNamespace(x=event_x, y=divider_y, button=1, dblclick=True)
+    )
+
+    assert upper_axis.get_position().height == pytest.approx(
+        lower_axis.get_position().height
+    )
+
+
+def test_plot_resize_handles_are_visible_and_legends_are_draggable(window):
+    assert len(window._plot_divider_artists) == 3
+    for divider_line, grip_marks in window._plot_divider_artists:
+        assert divider_line.get_visible()
+        assert divider_line.get_linewidth() <= 1
+        assert not grip_marks.get_visible()
+
+    legend = window.ax1.get_legend()
+    assert legend is not None
+    assert legend.get_draggable()
+
+    window._set_plot_divider_hover(1)
+    assert window._plot_divider_artists[1][1].get_visible()

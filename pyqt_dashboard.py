@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+from matplotlib.lines import Line2D
 from matplotlib.widgets import Cursor
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
@@ -21,6 +22,8 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSlider,
+    QSizePolicy,
+    QSplitter,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -101,7 +104,7 @@ class SignalDashboard(QMainWindow):
         main_layout.setSpacing(20)
 
         sidebar_frame = QFrame()
-        sidebar_frame.setFixedWidth(380)
+        sidebar_frame.setMinimumWidth(300)
         sidebar_layout = QVBoxLayout(sidebar_frame)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(8)
@@ -238,9 +241,9 @@ class SignalDashboard(QMainWindow):
         self.cursor_label = QLabel("Move over a time plot to inspect coordinates.")
         self.cursor_label.setWordWrap(True)
         sidebar_layout.addWidget(self.cursor_label)
-        main_layout.addWidget(sidebar_frame)
 
         plot_frame = QFrame()
+        plot_frame.setMinimumWidth(400)
         plot_layout = QVBoxLayout(plot_frame)
         plot_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -250,11 +253,34 @@ class SignalDashboard(QMainWindow):
         self.ax3_phase = self.ax3.twinx()
 
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         plot_layout.addWidget(self.toolbar)
+        self.plot_resize_hint = QLabel(
+            "Drag a gap between plots to resize; double-click to reset adjacent plots."
+        )
+        self.plot_resize_hint.setAlignment(Qt.AlignmentFlag.AlignRight)
+        plot_layout.addWidget(self.plot_resize_hint)
         plot_layout.addWidget(self.canvas)
-        main_layout.addWidget(plot_frame, stretch=1)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.addWidget(sidebar_frame)
+        self.main_splitter.addWidget(plot_frame)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([380, 850])
+        main_layout.addWidget(self.main_splitter)
         self.canvas.mpl_connect("motion_notify_event", self.inspect_plot_position)
+        self.canvas.mpl_connect("button_press_event", self._start_plot_resize)
+        self.canvas.mpl_connect("motion_notify_event", self._update_plot_resize)
+        self.canvas.mpl_connect("button_release_event", self._finish_plot_resize)
+        self.canvas.mpl_connect("resize_event", self._resize_plot_canvas)
+        self._active_plot_divider = None
+        self._plot_layout_initialized = False
+        self._plot_divider_artists = []
+        self._hovered_plot_divider = None
+        self._plot_divider_color = "#8090a0"
         self.cursors = []
         self._apply_theme()
 
@@ -401,6 +427,7 @@ class SignalDashboard(QMainWindow):
         self.theme_btn.setText("Switch to Light Theme" if self.dark_theme else "Switch to Dark Theme")
         if hasattr(self, "fig"):
             self.fig.patch.set_facecolor(background)
+            self._plot_divider_color = "#8090a0" if self.dark_theme else "#65727e"
             for axis in self.fig.axes:
                 axis.set_facecolor(background)
                 axis.tick_params(colors=foreground)
@@ -409,6 +436,7 @@ class SignalDashboard(QMainWindow):
                 axis.title.set_color(foreground)
                 axis.grid(True, color=grid_color, linestyle="--", alpha=0.3)
             self.canvas.draw_idle()
+            self._set_plot_divider_hover(self._hovered_plot_divider)
 
     def toggle_theme(self):
         self.dark_theme = not self.dark_theme
@@ -422,6 +450,223 @@ class SignalDashboard(QMainWindow):
         self.cursor_label.setText(
             f"{plot_name}: time = {event.xdata:.5g} s, amplitude = {event.ydata:.5g}"
         )
+
+    def _find_plot_divider(self, event):
+        figure_width, figure_height = self.fig.bbox.width, self.fig.bbox.height
+        if not figure_width or not figure_height or event.x is None or event.y is None:
+            return None
+
+        axes = sorted(
+            (self.ax1, self.ax2, self.ax3, self.ax4),
+            key=lambda axis: axis.get_position().y0,
+            reverse=True,
+        )
+        first_position = axes[0].get_position()
+        x_position = event.x / figure_width
+        if not first_position.x0 <= x_position <= first_position.x1:
+            return None
+
+        y_position = event.y / figure_height
+        for index, (upper_axis, lower_axis) in enumerate(zip(axes, axes[1:])):
+            upper_position = upper_axis.get_position()
+            lower_position = lower_axis.get_position()
+            divider = (upper_position.y0 + lower_position.y1) / 2
+            if abs(y_position - divider) * figure_height <= 16:
+                return index, upper_axis, lower_axis
+        return None
+
+    def _create_plot_resize_handles(self):
+        if self._plot_divider_artists:
+            return
+        for _ in range(3):
+            divider_line = Line2D(
+                [],
+                [],
+                transform=self.fig.transFigure,
+                color=self._plot_divider_color,
+                linewidth=0.8,
+                alpha=0.7,
+                solid_capstyle="round",
+                clip_on=False,
+                zorder=10,
+            )
+            grip_marks = Line2D(
+                [],
+                [],
+                transform=self.fig.transFigure,
+                color="#3daee9",
+                linestyle="None",
+                marker="|",
+                markersize=6,
+                markeredgewidth=1.2,
+                visible=False,
+                zorder=11,
+            )
+            self.fig.add_artist(divider_line)
+            self.fig.add_artist(grip_marks)
+            self._plot_divider_artists.append((divider_line, grip_marks))
+        self._update_plot_resize_handles()
+
+    def _update_plot_resize_handles(self):
+        if not self._plot_divider_artists:
+            return
+        axes = sorted(
+            (self.ax1, self.ax2, self.ax3, self.ax4),
+            key=lambda axis: axis.get_position().y0,
+            reverse=True,
+        )
+        for index, (upper_axis, lower_axis) in enumerate(zip(axes, axes[1:])):
+            upper_position = upper_axis.get_position()
+            lower_position = lower_axis.get_position()
+            y_position = (upper_position.y0 + lower_position.y1) / 2
+            left, right = upper_position.x0, upper_position.x1
+            divider_line, grip_marks = self._plot_divider_artists[index]
+            divider_line.set_data([left, right], [y_position, y_position])
+            center = (left + right) / 2
+            grip_width = min(0.02, (right - left) * 0.04)
+            grip_marks.set_data(
+                [center - grip_width, center, center + grip_width],
+                [y_position] * 3,
+            )
+        self._set_plot_divider_hover(self._hovered_plot_divider)
+
+    def _set_plot_divider_hover(self, index):
+        self._hovered_plot_divider = index
+        for handle_index, (divider_line, grip_marks) in enumerate(
+            self._plot_divider_artists
+        ):
+            is_hovered = handle_index == index
+            divider_line.set_color(
+                "#3daee9"
+                if is_hovered
+                else ("#484f57" if self.dark_theme else "#c9ced3")
+            )
+            divider_line.set_linewidth(1.4 if is_hovered else 0.8)
+            grip_marks.set_visible(is_hovered)
+            grip_marks.set_color("#3daee9")
+
+    def _apply_responsive_plot_sizing(self):
+        for axis in (self.ax1, self.ax2, self.ax3, self.ax3_phase, self.ax4):
+            bounds = axis.get_window_extent()
+            scale = min(1.0, max(0.65, min(bounds.width / 500, bounds.height / 160)))
+            axis.title.set_fontsize(10 * scale)
+            axis.xaxis.label.set_size(9 * scale)
+            axis.yaxis.label.set_size(9 * scale)
+            axis.tick_params(labelsize=8 * scale)
+            legend = axis.get_legend()
+            if legend is not None:
+                for text in legend.get_texts():
+                    text.set_fontsize(8 * scale)
+
+    @staticmethod
+    def _style_legend(legend, background, foreground, grid_color):
+        legend.get_frame().set_facecolor(background)
+        legend.get_frame().set_edgecolor(grid_color)
+        for text in legend.get_texts():
+            text.set_color(foreground)
+        legend.set_draggable(True, use_blit=False)
+
+    def _resize_plot_canvas(self, event):
+        if not self._plot_layout_initialized:
+            return
+        self._update_plot_resize_handles()
+        self._apply_responsive_plot_sizing()
+
+    def _set_plot_divider(self, upper_axis, lower_axis, upper_position, lower_position, delta):
+        minimum_height = 0.08
+        minimum_delta = lower_position.y0 + minimum_height - lower_position.y1
+        maximum_delta = upper_position.y1 - minimum_height - upper_position.y0
+        delta = min(max(delta, minimum_delta), maximum_delta)
+
+        upper_bottom = upper_position.y0 + delta
+        lower_top = lower_position.y1 + delta
+        upper_axis.set_position(
+            (
+                upper_position.x0,
+                upper_bottom,
+                upper_position.width,
+                upper_position.y1 - upper_bottom,
+            ),
+            which="both",
+        )
+        lower_axis.set_position(
+            (
+                lower_position.x0,
+                lower_position.y0,
+                lower_position.width,
+                lower_top - lower_position.y0,
+            ),
+            which="both",
+        )
+        if upper_axis is self.ax3 or lower_axis is self.ax3:
+            self.ax3_phase.set_position(self.ax3.get_position(), which="both")
+        self._update_plot_resize_handles()
+        self._apply_responsive_plot_sizing()
+
+    def _start_plot_resize(self, event):
+        if event.button != 1 or getattr(self.toolbar, "mode", ""):
+            return
+        divider = self._find_plot_divider(event)
+        if divider is None:
+            return
+
+        _, upper_axis, lower_axis = divider
+        upper_position = upper_axis.get_position().frozen()
+        lower_position = lower_axis.get_position().frozen()
+        if event.dblclick:
+            gap = upper_position.y0 - lower_position.y1
+            equal_height = (
+                upper_position.y1 - lower_position.y0 - gap
+            ) / 2
+            delta = upper_position.y1 - equal_height - upper_position.y0
+            self._set_plot_divider(
+                upper_axis, lower_axis, upper_position, lower_position, delta
+            )
+            self.canvas.draw_idle()
+            return
+
+        self._active_plot_divider = (
+            upper_axis,
+            lower_axis,
+            upper_position,
+            lower_position,
+            event.y,
+        )
+
+    def _update_plot_resize(self, event):
+        if self._active_plot_divider is not None:
+            figure_height = self.fig.bbox.height
+            if not figure_height or event.y is None:
+                return
+            (
+                upper_axis,
+                lower_axis,
+                upper_position,
+                lower_position,
+                start_y,
+            ) = self._active_plot_divider
+            delta = (event.y - start_y) / figure_height
+            self._set_plot_divider(
+                upper_axis, lower_axis, upper_position, lower_position, delta
+            )
+            self.canvas.draw_idle()
+            return
+
+        if getattr(self.toolbar, "mode", ""):
+            return
+        divider = self._find_plot_divider(event)
+        divider_index = divider[0] if divider is not None else None
+        if divider is not None:
+            self.canvas.setCursor(Qt.CursorShape.SizeVerCursor)
+        else:
+            self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+        self._set_plot_divider_hover(divider_index)
+
+    def _finish_plot_resize(self, event):
+        if self._active_plot_divider is not None:
+            self._active_plot_divider = None
+            self.canvas.draw_idle()
+            self._update_plot_resize(event)
 
     def on_filter_change(self, choice):
         enabled = choice != "None"
@@ -656,11 +901,12 @@ class SignalDashboard(QMainWindow):
         self.ax1.set_xlabel("Time (s)")
         self.ax1.set_ylabel("Amplitude")
         if self.ax1.get_legend_handles_labels()[0]:
-            self.ax1.legend(loc="upper right", fontsize=8)
+            legend = self.ax1.legend(loc="best", fontsize=8, framealpha=0.8)
+            self._style_legend(legend, background, foreground, grid_color)
         self.ax1.grid(True, linestyle="--", alpha=0.3)
 
         self.ax2.clear()
-        self.ax2.plot(t_cont, y_cont_filtered, color="#3daee9", alpha=0.25)
+        self.ax2.plot(t_samp, y_samp_filtered, color="#3daee9", alpha=0.65)
         self.ax2.stem(
             t_samp,
             y_samp_filtered,
@@ -710,7 +956,10 @@ class SignalDashboard(QMainWindow):
             )
             lines = line_mag + line_phase
             labels = [line.get_label() for line in lines]
-            self.ax3.legend(lines, labels, loc="best", fontsize=8, framealpha=0.6)
+            legend = self.ax3.legend(
+                lines, labels, loc="best", fontsize=8, framealpha=0.8
+            )
+            self._style_legend(legend, background, foreground, grid_color)
         else:
             self.ax3.set_title(
                 "Filter Frequency Response (No Filter Selected)",
@@ -753,7 +1002,12 @@ class SignalDashboard(QMainWindow):
             Cursor(axis, useblit=False, color="#ff5555", linewidth=0.8)
             for axis in (self.ax1, self.ax2)
         ]
-        self.fig.tight_layout(pad=3.0)
+        if not self._plot_layout_initialized:
+            self.fig.tight_layout(pad=3.0)
+            self._plot_layout_initialized = True
+            self._create_plot_resize_handles()
+        self._update_plot_resize_handles()
+        self._apply_responsive_plot_sizing()
         self.canvas.draw()
 
     def export_plot(self):
