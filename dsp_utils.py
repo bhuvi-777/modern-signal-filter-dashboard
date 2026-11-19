@@ -82,3 +82,36 @@ def calculate_frequency_response(b, a, sampling_frequency, points=2000):
     magnitude_db = 20 * np.log10(np.maximum(np.abs(h), 1e-10))
     phase_degrees = np.unwrap(np.angle(h)) * 180 / np.pi
     return frequencies, magnitude_db, phase_degrees
+
+
+def compute_spectrum(signal, fs):
+    try:
+        samples = np.asarray(signal, dtype=float)
+    except (TypeError, ValueError) as err:
+        raise ValueError("Signal must contain finite numeric samples.") from err
+
+    if samples.ndim != 1:
+        raise ValueError("Signal must be a one-dimensional array.")
+    if samples.size == 0:
+        raise ValueError("Signal must not be empty.")
+    if samples.size < 2:
+        raise ValueError("Signal must contain at least 2 samples.")
+    if not np.all(np.isfinite(samples)):
+        raise ValueError("Signal samples must be finite (no NaN or infinity).")
+
+    try:
+        sampling_frequency = float(fs)
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            "Sampling frequency must be a positive finite number."
+        ) from err
+    if not np.isfinite(sampling_frequency) or sampling_frequency <= 0:
+        raise ValueError("Sampling frequency must be a positive finite number.")
+
+    amplitude = np.abs(np.fft.rfft(samples)) * (2.0 / samples.size)
+    amplitude[0] /= 2.0
+    if samples.size % 2 == 0:
+        amplitude[-1] /= 2.0
+
+    frequencies = np.fft.rfftfreq(samples.size, d=1.0 / sampling_frequency)
+    return frequencies, amplitude

@@ -32,6 +32,7 @@ from dsp_utils import (
     add_noise_and_distortion,
     apply_digital_filter,
     calculate_frequency_response,
+    compute_spectrum,
     generate_signal,
 )
 from export_utils import save_plot, save_signal_csv
@@ -243,7 +244,9 @@ class SignalDashboard(QMainWindow):
         plot_layout = QVBoxLayout(plot_frame)
         plot_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.fig, (self.ax1, self.ax2, self.ax3) = plt.subplots(3, 1, figsize=(7, 9))
+        self.fig, (self.ax1, self.ax2, self.ax3, self.ax4) = plt.subplots(
+            4, 1, figsize=(7, 12)
+        )
         self.ax3_phase = self.ax3.twinx()
 
         self.canvas = FigureCanvas(self.fig)
@@ -577,6 +580,14 @@ class SignalDashboard(QMainWindow):
             )
             return
 
+        try:
+            spectrum_frequencies, spectrum_amplitude = compute_spectrum(
+                y_samp_filtered, sampling_frequency
+            )
+        except ValueError as err:
+            self.set_status(f"Invalid input: {err}", "error")
+            return
+
         minimum_sampling_frequency = 2 * signal_frequency
         if sampling_frequency <= minimum_sampling_frequency:
             diagnostic = (
@@ -597,7 +608,7 @@ class SignalDashboard(QMainWindow):
         foreground = "#ffffff" if self.dark_theme else "#20252b"
         grid_color = "#b0b0b0" if self.dark_theme else "#78828c"
         self.ax1.clear()
-        for axis in (self.ax1, self.ax2, self.ax3, self.ax3_phase):
+        for axis in (self.ax1, self.ax2, self.ax3, self.ax3_phase, self.ax4):
             axis.set_facecolor(background)
             axis.tick_params(colors=foreground)
             axis.xaxis.label.set_color(foreground)
@@ -713,6 +724,27 @@ class SignalDashboard(QMainWindow):
         self.ax3.set_xlabel("Frequency (Hz)")
         self.ax3.set_xlim(0, sampling_frequency / 2)
         self.ax3.grid(True, color=grid_color, linestyle="--", alpha=0.3)
+
+        self.ax4.clear()
+        self.ax4.set_facecolor(background)
+        self.ax4.tick_params(colors=foreground)
+        peak_index = np.argmax(spectrum_amplitude)
+        peak_frequency = spectrum_frequencies[peak_index]
+        self.ax4.plot(
+            spectrum_frequencies,
+            spectrum_amplitude,
+            color="#3daee9",
+            linewidth=1.8,
+        )
+        self.ax4.set_title(
+            f"Output Spectrum (Peak: {peak_frequency:g} Hz)",
+            fontweight="bold",
+            color=foreground,
+        )
+        self.ax4.set_xlabel("Frequency (Hz)", color=foreground)
+        self.ax4.set_ylabel("Amplitude", color=foreground)
+        self.ax4.set_xlim(0, sampling_frequency / 2)
+        self.ax4.grid(True, color=grid_color, linestyle="--", alpha=0.3)
 
         self.last_export_data = (t_samp, y_samp_primary, y_samp_filtered)
         for cursor in self.cursors:

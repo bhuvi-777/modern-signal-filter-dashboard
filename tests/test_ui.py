@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import numpy as np
 import pyqt_dashboard
 from dsp_utils import SIGNAL_TYPES
 from pyqt_dashboard import SignalDashboard
@@ -394,3 +395,54 @@ def test_script_entrypoint_creates_shows_and_runs_application():
         ("event-loop",),
         ("exit", 0),
     ]
+
+
+def test_spectrum_plot_is_created_at_startup(window):
+    assert window.ax4 in window.fig.axes
+    assert window.ax4.lines
+    assert window.ax4.get_xlabel() == "Frequency (Hz)"
+    assert window.ax4.get_ylabel() == "Amplitude"
+    assert "Peak:" in window.ax4.get_title()
+
+
+def test_spectrum_peak_tracks_signal_frequency(window):
+    window.samp_freq_entry.setText("1000")
+    window.sig_freq_entry.setText("80")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    frequencies, amplitude = window.ax4.lines[0].get_data()
+    peak_index = np.argmax(amplitude)
+    assert frequencies[peak_index] == pytest.approx(80)
+    assert "Peak: 80 Hz" in window.ax4.get_title()
+
+
+def test_invalid_input_keeps_previous_spectrum(window):
+    previous_line = window.ax4.lines[0]
+    previous_title = window.ax4.get_title()
+    window.sig_freq_entry.setText("invalid")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert window.ax4.lines[0] is previous_line
+    assert window.ax4.get_title() == previous_title
+
+
+def test_spectrum_redraws_with_both_themes(window):
+    window.toggle_theme()
+
+    assert window.ax4.lines
+    assert window.ax4.get_facecolor()[:3] == pytest.approx(
+        (244 / 255, 246 / 255, 248 / 255)
+    )
+    assert window.ax4.xaxis.label.get_color() == "#20252b"
+
+    window.toggle_theme()
+
+    assert window.ax4.lines
+    assert window.ax4.get_facecolor()[:3] == pytest.approx(
+        (43 / 255, 43 / 255, 43 / 255)
+    )
+    assert window.ax4.xaxis.label.get_color() == "#ffffff"
