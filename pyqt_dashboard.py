@@ -35,6 +35,7 @@ from dsp_utils import (
     add_noise_and_distortion,
     apply_digital_filter,
     calculate_frequency_response,
+    compute_comparison,
     compute_measurements,
     compute_snr_db,
     compute_spectrum,
@@ -851,6 +852,15 @@ class SignalDashboard(QMainWindow):
                 f"Crest factor: {measurements['crest_factor']:.6g}\n"
                 f"Peak frequency: {measurements['peak_frequency_hz']:g} Hz"
             )
+            comparison = compute_comparison(y_samp_primary, y_samp_filtered)
+            measurement_text += (
+                "\n\nOriginal RMS: "
+                f"{comparison['rms_original']:.6g}\n"
+                f"Filtered RMS: {comparison['rms_filtered']:.6g}\n"
+                f"Attenuation: {comparison['attenuation_db']:.6g} dB\n"
+                "RMS reduction: "
+                f"{comparison['rms_reduction_percent']:.6g}%"
+            )
             if noise_amount > 0:
                 try:
                     snr_db = compute_snr_db(y_samp_clean, y_samp_primary)
@@ -1013,7 +1023,22 @@ class SignalDashboard(QMainWindow):
             spectrum_amplitude,
             color="#3daee9",
             linewidth=1.8,
+            label="Filtered",
         )
+        if filter_type != "None":
+            original_frequencies, original_amplitude = compute_spectrum(
+                y_samp_primary, sampling_frequency
+            )
+            self.ax4.plot(
+                original_frequencies,
+                original_amplitude,
+                color="#ffaa00",
+                linewidth=1.5,
+                linestyle="--",
+                label="Original",
+            )
+            legend = self.ax4.legend(loc="best", fontsize=8, framealpha=0.8)
+            self._style_legend(legend, background, foreground, grid_color)
         self.ax4.set_title(
             f"Output Spectrum (Peak: {peak_frequency:g} Hz)",
             fontweight="bold",

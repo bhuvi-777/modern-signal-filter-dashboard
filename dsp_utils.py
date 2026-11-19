@@ -197,3 +197,35 @@ def compute_thd(signal, fs, fundamental_hz, n_harmonics=10):
         harmonic_index = int(np.argmin(np.abs(frequencies - harmonic_frequency)))
         harmonic_power += float(amplitude[harmonic_index] ** 2)
     return float(np.sqrt(harmonic_power) / fundamental_amplitude)
+
+
+def compute_comparison(original, filtered):
+    try:
+        original_samples = np.asarray(original, dtype=float)
+        filtered_samples = np.asarray(filtered, dtype=float)
+    except (TypeError, ValueError) as err:
+        raise ValueError("Original and filtered signals must contain numeric samples.") from err
+    if original_samples.ndim != 1 or filtered_samples.ndim != 1:
+        raise ValueError("Original and filtered signals must be one-dimensional.")
+    if original_samples.size == 0 or filtered_samples.size == 0:
+        raise ValueError("Original and filtered signals must not be empty.")
+    if original_samples.size != filtered_samples.size:
+        raise ValueError("Original and filtered signals must have the same number of samples.")
+    if not np.all(np.isfinite(original_samples)) or not np.all(np.isfinite(filtered_samples)):
+        raise ValueError("Original and filtered signals must contain only finite values.")
+
+    rms_original = float(np.sqrt(np.mean(original_samples * original_samples)))
+    rms_filtered = float(np.sqrt(np.mean(filtered_samples * filtered_samples)))
+    if rms_original <= 0:
+        raise ValueError("Original signal RMS must be greater than zero.")
+    if rms_filtered <= 0:
+        raise ValueError("Filtered signal RMS must be greater than zero.")
+
+    attenuation_db = float(20.0 * np.log10(rms_filtered / rms_original))
+    rms_reduction_percent = float((1.0 - rms_filtered / rms_original) * 100.0)
+    return {
+        "rms_original": rms_original,
+        "rms_filtered": rms_filtered,
+        "attenuation_db": attenuation_db,
+        "rms_reduction_percent": rms_reduction_percent,
+    }

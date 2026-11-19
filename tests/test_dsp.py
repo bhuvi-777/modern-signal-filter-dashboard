@@ -365,3 +365,43 @@ def test_thd_pure_sine_and_square():
 def test_measurement_invalid_inputs_raise_value_error(function, arguments):
     with pytest.raises(ValueError):
         function(*arguments)
+
+
+def test_comparison_half_amplitude_matches_expected_db_and_reduction():
+    time = np.arange(0, 1, 1 / FS)
+    original = np.sin(2 * np.pi * 5 * time)
+    filtered = 0.5 * original
+
+    comparison = dsp_utils.compute_comparison(original, filtered)
+
+    assert comparison["rms_original"] == pytest.approx(1 / np.sqrt(2), rel=0.02)
+    assert comparison["rms_filtered"] == pytest.approx(0.5 / np.sqrt(2), rel=0.02)
+    assert comparison["attenuation_db"] == pytest.approx(-6.02, abs=0.1)
+    assert comparison["rms_reduction_percent"] == pytest.approx(50, abs=0.5)
+
+
+def test_comparison_identical_signals_are_zero_db_and_zero_reduction():
+    signal = np.linspace(-1, 1, 100)
+
+    comparison = dsp_utils.compute_comparison(signal, signal)
+
+    assert comparison["attenuation_db"] == pytest.approx(0, abs=1e-12)
+    assert comparison["rms_reduction_percent"] == pytest.approx(0, abs=1e-12)
+
+
+def test_comparison_zero_filtered_signal_is_reported_as_complete_reduction():
+    original = np.ones(100)
+    with pytest.raises(ValueError, match="Filtered signal RMS must be greater than zero"):
+        dsp_utils.compute_comparison(original, np.zeros(100))
+
+
+@pytest.mark.parametrize(
+    ("original", "filtered"),
+    [
+        (np.zeros(10), np.ones(10)),
+        (np.ones(5), np.ones(4)),
+    ],
+)
+def test_comparison_rejects_zero_original_and_mismatched_lengths(original, filtered):
+    with pytest.raises(ValueError):
+        dsp_utils.compute_comparison(original, filtered)

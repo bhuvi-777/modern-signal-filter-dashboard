@@ -544,3 +544,14 @@ def test_measurements_panel_shows_snr_when_noise_is_on(window):
     window.update_plot()
 
     assert "SNR:" in window.measurement_label.text()
+
+
+def test_measurements_panel_shows_original_filtered_comparison(window):
+    window.update_timer.stop()
+    window.update_plot()
+    text = window.measurement_label.text()
+
+    assert "Original RMS:" in text
+    assert "Filtered RMS:" in text
+    assert "Attenuation:" in text
+    assert "RMS reduction:" in text
