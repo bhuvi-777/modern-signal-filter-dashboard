@@ -1,0 +1,396 @@
+import ast
+from itertools import product
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+import pyqt_dashboard
+from dsp_utils import SIGNAL_TYPES
+from pyqt_dashboard import SignalDashboard
+
+
+@pytest.fixture
+def window(qtbot):
+    dashboard = SignalDashboard()
+    qtbot.addWidget(dashboard)
+    dashboard.show()
+    return dashboard
+
+
+def test_app_starts_with_tabs_toolbar_and_initial_plot(window):
+    assert [window.control_tabs.tabText(i) for i in range(window.control_tabs.count())] == [
+        "Signal",
+        "Filter",
+        "Effects",
+        "Export",
+        "Help",
+    ]
+    assert window.toolbar is not None
+    assert len(window.cursors) == 2
+    assert window.last_export_data is not None
+
+
+def test_every_preset_can_be_applied_and_plotted(window):
+    for name in SignalDashboard.PRESETS:
+        window.apply_preset(name)
+        window.update_timer.stop()
+        window.update_plot()
+        assert not window.status_label.text().startswith("Invalid input"), name
+        assert "Filter configuration error" not in window.status_label.text(), name
+        assert window.last_export_data is not None
+
+    assert "Aliasing risk" in window.status_label.text()
+
+
+def test_every_waveform_and_filter_combination_plots(window):
+    window.samp_freq_entry.setText("100")
+    window.duration_entry.setText("1")
+    window.cutoff1_entry.setText("15")
+    window.cutoff2_entry.setText("25")
+
+    for signal_type, filter_type in product(
+        SIGNAL_TYPES, ["None", "Lowpass", "Highpass", "Bandpass", "Bandstop"]
+    ):
+        window.sig_type_cb.setCurrentText(signal_type)
+        window.filter_cb.setCurrentText(filter_type)
+        window.update_timer.stop()
+        window.update_plot()
+
+        assert "Invalid input" not in window.status_label.text(), (
+            signal_type,
+            filter_type,
+        )
+        assert "Filter configuration error" not in window.status_label.text(), (
+            signal_type,
+            filter_type,
+        )
+        assert any(
+            f"{signal_type} (primary)" == line.get_label()
+            for line in window.ax1.lines
+        )
+        assert window.last_export_data[0].size == 100
+
+
+@pytest.mark.parametrize("order", ["2", "4", "6", "8"])
+def test_filter_order_choices_update_response(window, order):
+    window.samp_freq_entry.setText("200")
+    window.filter_cb.setCurrentText("Bandpass")
+    window.order_combo.setCurrentText(order)
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert "Filter configuration error" not in window.status_label.text()
+    assert window.ax3.lines
+
+
+def test_reversed_band_cutoffs_are_accepted(window):
+    window.samp_freq_entry.setText("100")
+    window.filter_cb.setCurrentText("Bandpass")
+    window.cutoff1_entry.setText("25")
+    window.cutoff2_entry.setText("15")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert "Filter configuration error" not in window.status_label.text()
+    assert window.ax3.lines
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("sig_freq_entry", "abc", "must be a number"),
+        ("sig_freq_entry", "NaN", "finite number"),
+        ("samp_freq_entry", "0", "greater than 0"),
+        ("duration_entry", "-1", "greater than 0"),
+        ("duration_entry", "3601", "must not exceed"),
+        ("noise_entry", "2", "between 0 and 1"),
+        ("distortion_entry", "101", "between 0% and 100%"),
+    ],
+)
+def test_invalid_input_reports_hint_and_keeps_previous_plot(
+    window, field, value, message
+):
+    original_line = window.ax1.lines[0]
+    getattr(window, field).setText(value)
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert message in window.status_label.text()
+    assert window.ax1.lines[0] is original_line
+
+
+def test_filter_cutoff_above_nyquist_reports_error(window):
+    window.samp_freq_entry.setText("100")
+    window.filter_cb.setCurrentText("Lowpass")
+    window.cutoff1_entry.setText("50")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert "below the Nyquist frequency" in window.status_label.text()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("sig_freq_entry", "-1", "0 Hz or higher"),
+        ("sig_freq_entry", "1000001", "must not exceed 1,000,000 Hz"),
+        ("samp_freq_entry", "1000001", "must not exceed 1,000,000 Sa/s"),
+    ],
+)
+def test_frequency_limits_show_actionable_errors(window, field, value, message):
+    getattr(window, field).setText(value)
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert message in window.status_label.text()
+
+
+def test_filter_requires_enough_samples(window):
+    window.samp_freq_entry.setText("100")
+    window.duration_entry.setText("0.1")
+    window.filter_cb.setCurrentText("Lowpass")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert "needs more than" in window.status_label.text()
+
+
+def test_sample_limit_is_validated(window):
+    window.samp_freq_entry.setText("1000000")
+    window.duration_entry.setText("2")
+    window.update_timer.stop()
+
+    window.update_plot()
+
+    assert "more than 1,000,000 samples" in window.status_label.text()
+
+
+def test_filter_selection_enables_relevant_cutoffs(window):
+    window.filter_cb.setCurrentText("Lowpass")
+    assert window.cutoff1_entry.isEnabled()
+    assert not window.cutoff2_entry.isEnabled()
+
+    window.filter_cb.setCurrentText("Bandpass")
+    assert window.cutoff1_entry.isEnabled()
+    assert window.cutoff2_entry.isEnabled()
+
+    window.filter_cb.setCurrentText("None")
+    assert not window.cutoff1_entry.isEnabled()
+    assert not window.cutoff2_entry.isEnabled()
+
+
+@pytest.mark.parametrize(
+    ("entry_name", "slider_name", "slider_value", "expected_text", "typed_text", "expected_slider"),
+    [
+        ("sig_freq_entry", "sig_freq_slider", 80, "8", "12.3", 123),
+        ("samp_freq_entry", "samp_freq_slider", 650, "65", "123.4", 1234),
+        ("duration_entry", "duration_slider", 125, "1.25", "2.5", 250),
+        ("cutoff1_entry", "cutoff1_slider", 200, "20", "22.3", 223),
+        ("cutoff2_entry", "cutoff2_slider", 300, "30", "35.7", 357),
+        ("noise_entry", "noise_slider", 50, "0.5", "0.75", 75),
+        ("distortion_entry", "distortion_slider", 65, "65", "72", 72),
+    ],
+)
+def test_sliders_and_text_entries_stay_in_sync(
+    window, entry_name, slider_name, slider_value, expected_text, typed_text, expected_slider
+):
+    entry = getattr(window, entry_name)
+    slider = getattr(window, slider_name)
+    slider.setValue(slider_value)
+    assert entry.text() == expected_text
+
+    entry.setText(typed_text)
+    assert slider.value() == expected_slider
+
+
+def test_theme_toggle_updates_theme(window):
+    assert window.dark_theme
+
+    window.toggle_theme()
+
+    assert not window.dark_theme
+    assert window.fig.get_facecolor()[:3] == pytest.approx(
+        (244 / 255, 246 / 255, 248 / 255)
+    )
+
+    window.toggle_theme()
+    assert window.dark_theme
+
+
+def test_cursor_readout_displays_plot_coordinates(window):
+    window.inspect_plot_position(
+        SimpleNamespace(inaxes=window.ax1, xdata=0.25, ydata=0.75)
+    )
+
+    assert "time = 0.25 s" in window.cursor_label.text()
+    assert "amplitude = 0.75" in window.cursor_label.text()
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        SimpleNamespace(inaxes=None, xdata=0.25, ydata=0.75),
+        SimpleNamespace(inaxes="not-an-axis", xdata=0.25, ydata=0.75),
+        SimpleNamespace(inaxes="target-axis", xdata=None, ydata=0.75),
+        SimpleNamespace(inaxes="target-axis", xdata=0.25, ydata=None),
+    ],
+)
+def test_cursor_ignores_outside_or_incomplete_coordinates(window, event):
+    if event.inaxes == "target-axis":
+        event.inaxes = window.ax1
+    before = window.cursor_label.text()
+
+    window.inspect_plot_position(event)
+
+    assert window.cursor_label.text() == before
+
+
+def test_parameter_edits_trigger_debounced_plot_update(window, qtbot):
+    window.sig_type_cb.setCurrentText("Cosine")
+    qtbot.waitUntil(
+        lambda: any("Cosine (primary)" == line.get_label() for line in window.ax1.lines),
+        timeout=2000,
+    )
+
+
+@pytest.mark.parametrize("extension", ["png", "pdf"])
+def test_ui_exports_plot(window, tmp_path, monkeypatch, extension):
+    path = tmp_path / f"dashboard.{extension}"
+    monkeypatch.setattr(
+        pyqt_dashboard.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (str(path), ""),
+    )
+
+    window.export_plot()
+
+    assert path.exists() and path.stat().st_size > 0
+    assert "Plot saved" in window.status_label.text()
+
+
+def test_ui_exports_csv(window, tmp_path, monkeypatch):
+    path = tmp_path / "dashboard.csv"
+    monkeypatch.setattr(
+        pyqt_dashboard.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (str(path), ""),
+    )
+
+    window.export_csv()
+
+    assert path.exists()
+    assert path.read_text(encoding="utf-8").startswith("Time (s),Original,Filtered")
+    assert "Signal data exported" in window.status_label.text()
+
+
+def test_export_failure_is_reported(window, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        pyqt_dashboard.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (str(tmp_path / "failure.png"), ""),
+    )
+
+    def fail_save(*args):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(pyqt_dashboard, "save_plot", fail_save)
+    window.export_plot()
+
+    assert "Could not save plot: permission denied" in window.status_label.text()
+
+
+@pytest.mark.parametrize("method_name", ["export_plot", "export_csv"])
+def test_export_buttons_do_nothing_before_a_plot_exists(
+    window, monkeypatch, method_name
+):
+    window.last_export_data = None
+    status_before = window.status_label.text()
+
+    def unexpected_dialog(*args):
+        raise AssertionError("The save dialog should not open without plot data.")
+
+    monkeypatch.setattr(pyqt_dashboard.QFileDialog, "getSaveFileName", unexpected_dialog)
+
+    getattr(window, method_name)()
+
+    assert window.status_label.text() == status_before
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (OSError("disk full"), "Could not export CSV: disk full"),
+        (ValueError("invalid signal data"), "Could not export CSV: invalid signal data"),
+    ],
+)
+def test_csv_export_failures_are_reported(window, monkeypatch, tmp_path, error, status):
+    monkeypatch.setattr(
+        pyqt_dashboard.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (str(tmp_path / "signals.csv"), ""),
+    )
+
+    def fail_export(*args):
+        raise error
+
+    monkeypatch.setattr(pyqt_dashboard, "save_signal_csv", fail_export)
+
+    window.export_csv()
+
+    assert status in window.status_label.text()
+
+
+def test_script_entrypoint_creates_shows_and_runs_application():
+    source_path = Path(pyqt_dashboard.__file__)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    main_block = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Name)
+        and node.test.left.id == "__name__"
+    )
+    calls = []
+
+    class FakeApplication:
+        def __init__(self, arguments):
+            calls.append(("application", arguments))
+
+        def exec(self):
+            calls.append(("event-loop",))
+            return 0
+
+    class FakeDashboard:
+        def show(self):
+            calls.append(("show",))
+
+    fake_sys = SimpleNamespace(
+        argv=["pyqt_dashboard.py"],
+        exit=lambda status: calls.append(("exit", status)),
+    )
+    module = ast.Module(body=[main_block], type_ignores=[])
+
+    exec(
+        compile(module, str(source_path), "exec"),
+        {
+            "__name__": "__main__",
+            "sys": fake_sys,
+            "QApplication": FakeApplication,
+            "SignalDashboard": FakeDashboard,
+        },
+    )
+
+    assert calls == [
+        ("application", ["pyqt_dashboard.py"]),
+        ("show",),
+        ("event-loop",),
+        ("exit", 0),
+    ]

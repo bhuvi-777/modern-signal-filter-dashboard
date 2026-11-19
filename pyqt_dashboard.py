@@ -70,7 +70,7 @@ class SignalDashboard(QMainWindow):
             "filter": "Bandpass",
             "cutoff1": "10.0",
             "cutoff2": "30.0",
-            "noise": 3,
+            "noise": 0.03,
             "distortion": 5,
         },
         "Nyquist Warning": {
@@ -441,7 +441,7 @@ class SignalDashboard(QMainWindow):
         self.filter_cb.setCurrentText(preset["filter"])
         self.cutoff1_entry.setText(preset["cutoff1"])
         self.cutoff2_entry.setText(preset["cutoff2"])
-        self.noise_slider.setValue(preset["noise"])
+        self.noise_slider.setValue(round(preset["noise"] * 100))
         self.distortion_slider.setValue(preset["distortion"])
         self.schedule_update()
 
@@ -496,8 +496,8 @@ class SignalDashboard(QMainWindow):
                 raise ValueError("Duration must be greater than 0 seconds.")
             if duration > 3600:
                 raise ValueError("Duration must not exceed 3,600 seconds.")
-            if noise_amount < 0 or noise_amount > 100:
-                raise ValueError("Noise amount must be between 0 and 100.")
+            if noise_amount < 0 or noise_amount > 1:
+                raise ValueError("Noise amount must be between 0 and 1.")
             if distortion_percent < 0 or distortion_percent > 100:
                 raise ValueError("Distortion must be between 0% and 100%.")
             distortion_amount = distortion_percent / 100.0
@@ -754,10 +754,16 @@ class SignalDashboard(QMainWindow):
             t, original, filtered = self.last_export_data
             try:
                 save_signal_csv(path, t, original, filtered)
-            except OSError as err:
+            except (OSError, ValueError) as err:
                 self.set_status(f"Could not export CSV: {err}", "error")
             else:
                 self.set_status(f"Signal data exported to {path}", "info")
+
+    def closeEvent(self, event):
+        for cursor in self.cursors:
+            cursor.disconnect_events()
+        plt.close(self.fig)
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":

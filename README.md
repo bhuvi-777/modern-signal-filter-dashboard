@@ -50,6 +50,18 @@ From the project directory, run:
 python pyqt_dashboard.py
 ```
 
+## Run Tests
+
+Install the application and test dependencies, then run the test suite:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -v
+```
+
+The tests run with Qt's offscreen platform, so they do not open a visible window.
+GitHub Actions runs the same suite for pushes and pull requests.
+
 ## Controls
 
 ### Signal Type
@@ -122,6 +134,16 @@ external devices or services.
 ├── pyqt_dashboard.py
 ├── dsp_utils.py
 ├── export_utils.py
+├── requirements-dev.txt
+├── pytest.ini
+├── tests/
+│   ├── conftest.py
+│   ├── test_dsp.py
+│   ├── test_export.py
+│   └── test_ui.py
+├── .github/
+│   └── workflows/
+│       └── tests.yml
 ├── README.md
 ```
 

@@ -20,6 +20,10 @@ def generate_signal(t, frequency, signal_type):
 
 
 def add_noise_and_distortion(signal, noise_amount=0.0, distortion_amount=0.0, seed=42):
+    if not np.isfinite(noise_amount) or noise_amount < 0:
+        raise ValueError("Noise amount must be non-negative.")
+    if not np.isfinite(distortion_amount) or not 0 <= distortion_amount <= 1:
+        raise ValueError("Distortion amount must be between 0 and 1.")
     result = np.asarray(signal, dtype=float).copy()
     if noise_amount > 0:
         rng = np.random.default_rng(seed)
