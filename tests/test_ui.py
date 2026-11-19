@@ -612,3 +612,30 @@ def test_ui_import_csv_mocks_dialog(window, tmp_path, monkeypatch):
     assert window.source_cb.currentText() == "Imported"
     assert window.imported_fs == pytest.approx(100)
     assert "CSV imported" in window.status_label.text()
+
+
+def test_save_current_preset_button_creates_named_preset(window):
+    window.preset_name_entry.setText("My Preset")
+    window.save_current_preset()
+    assert "My Preset" in window._user_presets
+    assert "Preset saved" in window.status_label.text()
+
+
+def test_save_and_load_session_mocked_dialogs(window, tmp_path, monkeypatch):
+    save_path = tmp_path / "session.json"
+    monkeypatch.setattr(
+        pyqt_dashboard.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (str(save_path), ""),
+    )
+    window.save_session()
+    assert save_path.exists()
+
+    window.sig_type_cb.setCurrentText("Cosine")
+    monkeypatch.setattr(
+        pyqt_dashboard.QFileDialog,
+        "getOpenFileName",
+        lambda *args: (str(save_path), ""),
+    )
+    window.load_session()
+    assert window.sig_type_cb.currentText() == "Sine"

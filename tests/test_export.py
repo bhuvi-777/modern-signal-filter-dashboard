@@ -76,3 +76,48 @@ def test_load_csv_invalid_cases_raise_value_error(tmp_path, contents):
     path.write_text(contents, encoding="utf-8")
     with pytest.raises(ValueError):
         __import__("export_utils").load_signal_csv(path, fs=100)
+
+
+def test_session_save_load_roundtrip(tmp_path):
+    settings = {
+        "waveform": "Square",
+        "filter_family": "Elliptic",
+        "filter_type": "Bandpass",
+        "cutoff1": 80.0,
+        "cutoff2": 120.0,
+        "order": 6,
+        "effects": {"noise": 0.1, "distortion": 0.2},
+        "theme": "dark",
+        "presets": {"My preset": {"waveform": "Sine"}},
+    }
+    path = tmp_path / "session.json"
+    __import__("export_utils").save_session(path, settings)
+    loaded = __import__("export_utils").load_session(path)
+    assert loaded == settings
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "{bad json",
+        "{}",
+        '{"version":2,"settings":{}}',
+        '{"version":"1","settings":{}}',
+        '{"version":1,"settings":[]}',
+    ],
+)
+def test_session_invalid_json_or_schema_raises(tmp_path, contents):
+    path = tmp_path / "bad.json"
+    path.write_text(contents, encoding="utf-8")
+    with pytest.raises(ValueError):
+        __import__("export_utils").load_session(path)
+
+
+def test_session_extra_keys_are_ignored(tmp_path):
+    path = tmp_path / "extra.json"
+    path.write_text(
+        '{"version":1,"settings":{"waveform":"Sine"},"future":123}',
+        encoding="utf-8",
+    )
+    loaded = __import__("export_utils").load_session(path)
+    assert loaded == {"waveform": "Sine"}

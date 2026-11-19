@@ -41,7 +41,13 @@ from dsp_utils import (
     compute_spectrum,
     generate_signal,
 )
-from export_utils import load_signal_csv, save_plot, save_signal_csv
+from export_utils import (
+    load_session,
+    load_signal_csv,
+    save_plot,
+    save_session,
+    save_signal_csv,
+)
 
 
 class SignalDashboard(QMainWindow):
@@ -247,6 +253,18 @@ class SignalDashboard(QMainWindow):
         export_layout.addWidget(self.source_cb)
         self.import_csv_btn = QPushButton("Import CSV")
         export_layout.addWidget(self.import_csv_btn)
+        export_layout.addWidget(QLabel("Session:"))
+        session_layout = QHBoxLayout()
+        self.save_session_btn = QPushButton("Save Session")
+        self.load_session_btn = QPushButton("Load Session")
+        session_layout.addWidget(self.save_session_btn)
+        session_layout.addWidget(self.load_session_btn)
+        export_layout.addLayout(session_layout)
+        self.preset_name_entry = QLineEdit()
+        self.preset_name_entry.setPlaceholderText("Preset name")
+        export_layout.addWidget(self.preset_name_entry)
+        self.save_preset_btn = QPushButton("Save Current Settings as Preset")
+        export_layout.addWidget(self.save_preset_btn)
         self.imported_time = None
         self.imported_signal = None
         self.imported_fs = None
@@ -337,6 +355,9 @@ class SignalDashboard(QMainWindow):
         self.export_plot_btn.clicked.connect(self.export_plot)
         self.export_csv_btn.clicked.connect(self.export_csv)
         self.import_csv_btn.clicked.connect(self.import_csv)
+        self.save_session_btn.clicked.connect(self.save_session)
+        self.load_session_btn.clicked.connect(self.load_session)
+        self.save_preset_btn.clicked.connect(self.save_current_preset)
         self.source_cb.currentTextChanged.connect(self.schedule_update)
         self.sig_type_cb.currentTextChanged.connect(self.schedule_update)
         self.order_combo.currentTextChanged.connect(self.schedule_update)
@@ -1206,6 +1227,87 @@ class SignalDashboard(QMainWindow):
         self.imported_fs = fs
         self.source_cb.setCurrentText("Imported")
         self.set_status(f"CSV imported: {path}", "info")
+
+    def _session_settings(self):
+        return {
+            "waveform": self.sig_type_cb.currentText(),
+            "frequency": self.sig_freq_entry.text(),
+            "sampling": self.samp_freq_entry.text(),
+            "duration": self.duration_entry.text(),
+            "filter_family": self.family_cb.currentText(),
+            "filter_type": self.filter_cb.currentText(),
+            "cutoff1": self.cutoff1_entry.text(),
+            "cutoff2": self.cutoff2_entry.text(),
+            "order": int(self.order_combo.currentText()),
+            "ripple": self.ripple_entry.text(),
+            "stopband": self.stopband_entry.text(),
+            "fir_window": self.fir_window_cb.currentText(),
+            "fir_taps": self.fir_taps_entry.text(),
+            "noise": self.noise_entry.text(),
+            "distortion": self.distortion_entry.text(),
+            "theme": "dark" if self.dark_theme else "light",
+            "presets": {
+                name: preset
+                for name, preset in getattr(self, "_user_presets", {}).items()
+            },
+        }
+
+    def save_session(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Session", "signal_session.json", "JSON File (*.json)"
+        )
+        if not path:
+            return
+        try:
+            save_session(path, self._session_settings())
+        except (OSError, ValueError) as err:
+            self.set_status(f"Could not save session: {err}", "error")
+        else:
+            self.set_status(f"Session saved to {path}", "info")
+
+    def load_session(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Session", "", "JSON File (*.json)"
+        )
+        if not path:
+            return
+        try:
+            settings = load_session(path)
+        except (OSError, ValueError) as err:
+            self.set_status(f"Could not load session: {err}", "error")
+            return
+
+        self.sig_type_cb.setCurrentText(settings["waveform"])
+        self.sig_freq_entry.setText(settings["frequency"])
+        self.samp_freq_entry.setText(settings["sampling"])
+        self.duration_entry.setText(settings["duration"])
+        self.family_cb.setCurrentText(settings["filter_family"])
+        self.filter_cb.setCurrentText(settings["filter_type"])
+        self.cutoff1_entry.setText(settings["cutoff1"])
+        self.cutoff2_entry.setText(settings["cutoff2"])
+        self.order_combo.setCurrentText(str(settings["order"]))
+        self.ripple_entry.setText(settings["ripple"])
+        self.stopband_entry.setText(settings["stopband"])
+        self.fir_window_cb.setCurrentText(settings["fir_window"])
+        self.fir_taps_entry.setText(settings["fir_taps"])
+        self.noise_entry.setText(settings["noise"])
+        self.distortion_entry.setText(settings["distortion"])
+        if settings["theme"] == "dark" and not self.dark_theme:
+            self.toggle_theme()
+        elif settings["theme"] == "light" and self.dark_theme:
+            self.toggle_theme()
+        self._user_presets = settings.get("presets", {})
+        self.set_status(f"Session loaded from {path}", "info")
+
+    def save_current_preset(self):
+        name = self.preset_name_entry.text().strip()
+        if not name:
+            self.set_status("Preset name must not be empty.", "error")
+            return
+        if not hasattr(self, "_user_presets"):
+            self._user_presets = {}
+        self._user_presets[name] = self._session_settings()
+        self.set_status(f"Preset saved: {name}", "info")
 
     def closeEvent(self, event):
         for cursor in self.cursors:

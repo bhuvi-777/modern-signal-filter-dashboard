@@ -1,5 +1,6 @@
 import csv
 import math
+import json
 from pathlib import Path
 
 import numpy as np
@@ -92,3 +93,36 @@ def load_signal_csv(path, fs=None):
             raise ValueError("Sampling frequency must be a positive finite number.")
         time = np.arange(signal.size, dtype=float) / fs
     return time, signal, float(fs)
+
+
+def save_session(path, settings):
+    if not isinstance(settings, dict):
+        raise ValueError("Session settings must be a dictionary.")
+    try:
+        with Path(path).open("w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "settings": settings}, handle, indent=2)
+    except (OSError, TypeError, ValueError) as err:
+        raise ValueError(f"Could not save session: {err}") from err
+
+
+def load_session(path):
+    try:
+        with Path(path).open("r", encoding="utf-8") as handle:
+            document = json.load(handle)
+    except FileNotFoundError as err:
+        raise ValueError(f"Session file does not exist: {path}") from err
+    except json.JSONDecodeError as err:
+        raise ValueError(f"Corrupted session JSON: {err}") from err
+    except (OSError, UnicodeDecodeError) as err:
+        raise ValueError(f"Could not read session: {err}") from err
+    if not isinstance(document, dict):
+        raise ValueError("Session JSON must contain an object.")
+    if "version" not in document or "settings" not in document:
+        raise ValueError("Session JSON is missing required version or settings keys.")
+    if type(document["version"]) is not int:
+        raise ValueError("Session version must be an integer.")
+    if document["version"] != 1:
+        raise ValueError(f"Unknown session version: {document['version']}.")
+    if not isinstance(document["settings"], dict):
+        raise ValueError("Session settings must be a dictionary.")
+    return document["settings"]
