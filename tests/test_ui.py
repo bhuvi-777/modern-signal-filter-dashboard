@@ -590,3 +590,25 @@ def test_filter_family_extra_fields_enable_relevant_controls(window):
     window.family_cb.setCurrentText("FIR")
     assert window.fir_window_cb.isEnabled()
     assert window.fir_taps_entry.isEnabled()
+
+
+def test_import_csv_button_and_source_switch_exist(window):
+    assert hasattr(window, "import_csv_btn")
+    assert window.source_cb.count() == 2
+    assert "Imported" in [window.source_cb.itemText(i) for i in range(window.source_cb.count())]
+
+
+def test_ui_import_csv_mocks_dialog(window, tmp_path, monkeypatch):
+    path = tmp_path / "import.csv"
+    path.write_text("Time (s),Signal\n0,0\n0.01,1\n0.02,0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        pyqt_dashboard.QFileDialog,
+        "getOpenFileName",
+        lambda *args: (str(path), ""),
+    )
+
+    window.import_csv()
+
+    assert window.source_cb.currentText() == "Imported"
+    assert window.imported_fs == pytest.approx(100)
+    assert "CSV imported" in window.status_label.text()

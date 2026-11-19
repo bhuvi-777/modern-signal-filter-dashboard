@@ -1,4 +1,8 @@
 import csv
+import math
+from pathlib import Path
+
+import numpy as np
 
 
 def save_signal_csv(path, t, original, filtered):
@@ -13,3 +17,78 @@ def save_signal_csv(path, t, original, filtered):
 
 def save_plot(path, figure):
     figure.savefig(path, bbox_inches="tight", facecolor=figure.get_facecolor())
+
+
+def load_signal_csv(path, fs=None):
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise ValueError(f"CSV file does not exist: {csv_path}")
+    try:
+        rows = []
+        with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+            for row in csv.reader(handle):
+                if not row or all(not cell.strip() for cell in row):
+                    continue
+                rows.append(row)
+    except (OSError, csv.Error) as err:
+        raise ValueError(f"Could not read CSV file: {err}") from err
+    if not rows:
+        raise ValueError("CSV file is empty.")
+
+    def parse_row(row):
+        values = []
+        for cell in row:
+            try:
+                value = float(cell.strip())
+            except (TypeError, ValueError) as err:
+                raise ValueError("Text in a number column is invalid.") from err
+            if not math.isfinite(value):
+                raise ValueError("CSV values must not contain NaN or infinity.")
+            values.append(value)
+        return values
+
+    first_numeric = []
+    try:
+        first_numeric = parse_row(rows[0])
+        data_rows = rows
+    except ValueError:
+        data_rows = rows[1:]
+        if not data_rows:
+            raise
+
+    widths = {len(row) for row in data_rows}
+    if len(widths) != 1:
+        raise ValueError("CSV rows must have a consistent number of columns.")
+    width = widths.pop()
+    if width not in (1, 2):
+        raise ValueError("CSV must contain one signal column or two time/signal columns.")
+
+    numeric_rows = [parse_row(row) for row in data_rows]
+    if len(numeric_rows) < 2:
+        raise ValueError("CSV must contain at least 2 samples.")
+    if len(numeric_rows) > 1_000_000:
+        raise ValueError("CSV contains more than 1,000,000 samples.")
+
+    array = np.asarray(numeric_rows, dtype=float)
+    if width == 2:
+        time = array[:, 0]
+        signal = array[:, 1]
+        if np.any(np.diff(time) <= 0):
+            raise ValueError("Time values must be strictly increasing.")
+        differences = np.diff(time)
+        median = float(np.median(differences))
+        if median <= 0 or np.max(np.abs(differences - median)) > 1e-6 * max(1.0, median):
+            raise ValueError("CSV sampling must be uniform.")
+        fs = 1.0 / median
+    else:
+        signal = array[:, 0]
+        if fs is None:
+            raise ValueError("Sampling frequency is required for a one-column CSV.")
+        try:
+            fs = float(fs)
+        except (TypeError, ValueError) as err:
+            raise ValueError("Sampling frequency must be a positive finite number.") from err
+        if not math.isfinite(fs) or fs <= 0:
+            raise ValueError("Sampling frequency must be a positive finite number.")
+        time = np.arange(signal.size, dtype=float) / fs
+    return time, signal, float(fs)

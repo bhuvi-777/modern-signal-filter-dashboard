@@ -41,7 +41,7 @@ from dsp_utils import (
     compute_spectrum,
     generate_signal,
 )
-from export_utils import save_plot, save_signal_csv
+from export_utils import load_signal_csv, save_plot, save_signal_csv
 
 
 class SignalDashboard(QMainWindow):
@@ -241,6 +241,15 @@ class SignalDashboard(QMainWindow):
         export_buttons_layout.addWidget(self.export_csv_btn)
         export_layout.addLayout(export_buttons_layout)
         export_layout.addWidget(QLabel("Save the current local plot as PNG/PDF or sampled data as CSV."))
+        export_layout.addWidget(QLabel("Signal Source:"))
+        self.source_cb = QComboBox()
+        self.source_cb.addItems(["Generated", "Imported"])
+        export_layout.addWidget(self.source_cb)
+        self.import_csv_btn = QPushButton("Import CSV")
+        export_layout.addWidget(self.import_csv_btn)
+        self.imported_time = None
+        self.imported_signal = None
+        self.imported_fs = None
 
         help_browser = QTextBrowser()
         help_browser.setOpenExternalLinks(False)
@@ -327,6 +336,8 @@ class SignalDashboard(QMainWindow):
         self.update_btn.clicked.connect(self.update_plot)
         self.export_plot_btn.clicked.connect(self.export_plot)
         self.export_csv_btn.clicked.connect(self.export_csv)
+        self.import_csv_btn.clicked.connect(self.import_csv)
+        self.source_cb.currentTextChanged.connect(self.schedule_update)
         self.sig_type_cb.currentTextChanged.connect(self.schedule_update)
         self.order_combo.currentTextChanged.connect(self.schedule_update)
 
@@ -846,10 +857,27 @@ class SignalDashboard(QMainWindow):
         )
         t_cont = np.linspace(0, duration, continuous_count)
         t_samp = np.arange(sample_count) / sampling_frequency
-
         primary_type = self.sig_type_cb.currentText()
-        y_cont_primary = generate_signal(t_cont, signal_frequency, primary_type)
-        y_samp_primary = generate_signal(t_samp, signal_frequency, primary_type)
+
+        if (
+            self.source_cb.currentText() == "Imported"
+            and self.imported_signal is not None
+            and self.imported_time is not None
+            and self.imported_fs is not None
+        ):
+            t_samp = self.imported_time.copy()
+            y_samp_primary = self.imported_signal.copy()
+            y_cont_primary = np.interp(
+                t_cont,
+                t_samp,
+                y_samp_primary,
+                left=y_samp_primary[0],
+                right=y_samp_primary[-1],
+            )
+            sampling_frequency = self.imported_fs
+        else:
+            y_cont_primary = generate_signal(t_cont, signal_frequency, primary_type)
+            y_samp_primary = generate_signal(t_samp, signal_frequency, primary_type)
         y_samp_clean = y_samp_primary.copy()
         y_cont_primary = add_noise_and_distortion(
             y_cont_primary, noise_amount, distortion_amount
@@ -1157,6 +1185,27 @@ class SignalDashboard(QMainWindow):
                 self.set_status(f"Could not export CSV: {err}", "error")
             else:
                 self.set_status(f"Signal data exported to {path}", "info")
+
+    def import_csv(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Signal CSV",
+            "",
+            "CSV File (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            fs = None
+            time, signal, fs = load_signal_csv(path, fs=fs)
+        except (OSError, ValueError) as err:
+            self.set_status(f"Could not import CSV: {err}", "error")
+            return
+        self.imported_time = time
+        self.imported_signal = signal
+        self.imported_fs = fs
+        self.source_cb.setCurrentText("Imported")
+        self.set_status(f"CSV imported: {path}", "info")
 
     def closeEvent(self, event):
         for cursor in self.cursors:
