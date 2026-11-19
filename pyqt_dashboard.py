@@ -711,14 +711,31 @@ class SignalDashboard(QMainWindow):
         upper_position = upper_axis.get_position().frozen()
         lower_position = lower_axis.get_position().frozen()
         if event.dblclick:
-            gap = upper_position.y0 - lower_position.y1
-            equal_height = (
-                upper_position.y1 - lower_position.y0 - gap
-            ) / 2
-            delta = upper_position.y1 - equal_height - upper_position.y0
-            self._set_plot_divider(
-                upper_axis, lower_axis, upper_position, lower_position, delta
+            bottom = min(upper_position.y0, lower_position.y0)
+            top = max(upper_position.y1, lower_position.y1)
+            boundary = (bottom + top) / 2
+            upper_axis.set_position(
+                (
+                    upper_position.x0,
+                    boundary,
+                    upper_position.width,
+                    top - boundary,
+                ),
+                which="both",
             )
+            lower_axis.set_position(
+                (
+                    lower_position.x0,
+                    bottom,
+                    lower_position.width,
+                    boundary - bottom,
+                ),
+                which="both",
+            )
+            if upper_axis is self.ax3 or lower_axis is self.ax3:
+                self.ax3_phase.set_position(self.ax3.get_position(), which="both")
+            self._update_plot_resize_handles()
+            self._apply_responsive_plot_sizing()
             self.canvas.draw_idle()
             return
 
@@ -1238,7 +1255,14 @@ class SignalDashboard(QMainWindow):
             for axis in (self.ax1, self.ax2)
         ]
         if not self._plot_layout_initialized:
-            self.fig.tight_layout(pad=3.0)
+            self.fig.subplots_adjust(
+                left=0.12,
+                right=0.9,
+                top=0.96,
+                bottom=0.08,
+                hspace=0.6,
+                wspace=0.3,
+            )
             self._plot_layout_initialized = True
             self._create_plot_resize_handles()
         self._update_plot_resize_handles()
